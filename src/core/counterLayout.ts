@@ -12,10 +12,18 @@ export const CAMERA_FOV_Y = 0.5;
 export const PIZZA_CENTER: Vec3 = vec3(0, 0, 0.5);
 export const PIZZA_RADIUS = 1.6;
 
-/** Grab targets (bowls) at scale 1, and how their far edge is anchored. */
+/** Grab targets (bowls, tools, the done object) at scale 1. */
 export const BOWL_RADIUS = 0.55;
-export const BOWL_FAR_EDGE_Z = -1.45;
-export const MAX_TARGET_SCALE = 1.6;
+export const MAX_TARGET_SCALE = 1.5;
+
+/** Bowls sit in a column either side of the pizza, like the art reference. */
+const COLUMN_X = 3.2;
+const COLUMN_Z = [1.55, -0.1, -1.75] as const;
+
+/** Near-side centre: the big "done" object in Toppings, the wheel in Cut. */
+export const FRONT_CENTER: Vec3 = vec3(0, 0, -1.9);
+/** Left of the pizza: the sauce bottle, then the cheese bowl. */
+export const TOOL_HOME: Vec3 = vec3(-COLUMN_X, 0, 0.3);
 
 /**
  * 15 mm (P3, T3) in CSS px. Browsers do not expose physical size, so this
@@ -39,22 +47,29 @@ export interface PlayArea {
   readonly maxZ: number;
 }
 
-/**
- * Everything interactive stays inside this rectangle on the counter, and the
- * camera frames exactly this. The near edge moves out as the bowls scale up.
- */
-export function playArea(targetScale: number): PlayArea {
-  return {
-    minX: -3.2,
-    maxX: 3.2,
-    minZ: BOWL_FAR_EDGE_Z - BOWL_RADIUS * 2 * targetScale - 0.2,
-    maxZ: PIZZA_CENTER.z + PIZZA_RADIUS + 0.2,
-  };
+/** Everything interactive stays inside this rectangle, and the camera frames exactly this. */
+export const PLAY_AREA: PlayArea = { minX: -4.1, maxX: 4.1, minZ: -2.65, maxZ: 2.4 };
+
+/** Bowl centre for a slot: 0-2 run down the left column, 3-5 down the right. */
+export function bowlSlotPosition(slot: number): Vec3 {
+  const column = Math.floor(slot / COLUMN_Z.length) % 2;
+  const row = slot % COLUMN_Z.length;
+  return vec3(column === 0 ? -COLUMN_X : COLUMN_X, 0, COLUMN_Z[row] ?? 0);
 }
 
-/** Bowl centre for a data-defined slot, given the current target scale. */
-export function bowlPosition(slotX: number, arcZ: number, targetScale: number): Vec3 {
-  return vec3(slotX, 0, BOWL_FAR_EDGE_Z - BOWL_RADIUS * targetScale + arcZ);
+/** Plate centres for the Plate stage: split between the two side columns. */
+export function platePositions(count: number): Vec3[] {
+  const perSide = Math.ceil(count / 2);
+  const zs = perSide <= 2 ? [1.4, -0.65] : [...COLUMN_Z];
+  return Array.from({ length: count }, (_, i) =>
+    vec3(i < perSide ? -COLUMN_X : COLUMN_X, 0, zs[i % perSide] ?? 0),
+  );
+}
+
+/** `count` evenly spaced x positions across the counter, for a row of plates or diners. */
+export function rowPositions(count: number, z: number): Vec3[] {
+  const span = (PLAY_AREA.maxX - PLAY_AREA.minX) / count;
+  return Array.from({ length: count }, (_, i) => vec3(PLAY_AREA.minX + span * (i + 0.5), 0, z));
 }
 
 function fitRig(aspect: number, area: PlayArea): CameraRig {
@@ -87,19 +102,12 @@ function fitRig(aspect: number, area: PlayArea): CameraRig {
 
 export function computeLayout(viewport: LandscapeViewport): CounterLayout {
   const aspect = viewport.width / viewport.height;
+  const rig = fitRig(aspect, PLAY_AREA);
 
-  // Bigger bowls need a bigger play area, which pushes the camera back and
-  // shrinks them again, so settle the scale over a few rounds.
-  let targetScale = 1;
-  let rig = fitRig(aspect, playArea(targetScale));
-  for (let i = 0; i < 6; i++) {
-    // Measure where the bowl furthest from the camera (smallest on screen) sits.
-    const reference = vec3(0, 0, BOWL_FAR_EDGE_Z + 0.5);
-    const px = worldLengthToPx(rig, reference, BOWL_RADIUS * 2 * targetScale, viewport.height);
-    if (px >= MIN_TARGET_PX || targetScale >= MAX_TARGET_SCALE) break;
-    targetScale = clamp((targetScale * MIN_TARGET_PX * 1.03) / px, 1, MAX_TARGET_SCALE);
-    rig = fitRig(aspect, playArea(targetScale));
-  }
+  // Measure the bowl furthest from the camera, which is the smallest on screen.
+  const reference = bowlSlotPosition(0);
+  const px = worldLengthToPx(rig, reference, BOWL_RADIUS * 2, viewport.height);
+  const targetScale = clamp(MIN_TARGET_PX / px, 1, MAX_TARGET_SCALE);
 
   return { viewport, aspect, rig, targetScale };
 }

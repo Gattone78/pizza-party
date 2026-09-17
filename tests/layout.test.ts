@@ -4,9 +4,11 @@ import {
   MIN_TARGET_PX,
   PIZZA_CENTER,
   PIZZA_RADIUS,
-  bowlPosition,
+  PLAY_AREA,
+  bowlSlotPosition,
+  platePositions,
+  rowPositions,
   computeLayout,
-  playArea,
 } from '../src/core/counterLayout';
 import { projectToNdc, screenToPlane, worldLengthToPx } from '../src/core/projection';
 import { distXZ, vec3 } from '../src/core/vec';
@@ -44,7 +46,7 @@ describe.each(Object.entries(devices))('layout on %s', (_name, [w, h]) => {
   const layout = computeLayout(landscapeViewport(w, h));
 
   it('keeps the whole play area on screen', () => {
-    const area = playArea(layout.targetScale);
+    const area = PLAY_AREA;
     for (const x of [area.minX, area.maxX]) {
       for (const z of [area.minZ, area.maxZ]) {
         const ndc = projectToNdc(layout.rig, layout.aspect, vec3(x, 0, z));
@@ -56,7 +58,7 @@ describe.each(Object.entries(devices))('layout on %s', (_name, [w, h]) => {
 
   it('makes every bowl at least 15 mm (96 CSS px) wide', () => {
     for (const t of toppings) {
-      const at = bowlPosition(t.bowlX, t.bowlArcZ, layout.targetScale);
+      const at = bowlSlotPosition(t.slot);
       const px = worldLengthToPx(layout.rig, at, BOWL_RADIUS * 2 * layout.targetScale, h);
       expect(px).toBeGreaterThanOrEqual(MIN_TARGET_PX);
     }
@@ -64,15 +66,40 @@ describe.each(Object.entries(devices))('layout on %s', (_name, [w, h]) => {
 
   it('keeps scaled bowls inside the play area and clear of the pizza and each other', () => {
     const r = BOWL_RADIUS * layout.targetScale;
-    const area = playArea(layout.targetScale);
-    const centres = toppings.map((t) => bowlPosition(t.bowlX, t.bowlArcZ, layout.targetScale));
+    const area = PLAY_AREA;
+    const centres = toppings.map((t) => bowlSlotPosition(t.slot));
     centres.forEach((c, i) => {
       expect(c.x - r).toBeGreaterThanOrEqual(area.minX);
       expect(c.x + r).toBeLessThanOrEqual(area.maxX);
       expect(c.z - r).toBeGreaterThanOrEqual(area.minZ);
+      expect(c.z + r).toBeLessThanOrEqual(area.maxZ);
       expect(distXZ(c, PIZZA_CENTER)).toBeGreaterThan(PIZZA_RADIUS + r);
       for (const other of centres.slice(i + 1)) expect(distXZ(c, other)).toBeGreaterThan(2 * r);
     });
+  });
+});
+
+describe('stations', () => {
+  it('gives every topping its own bowl slot', () => {
+    const keys = toppings.map((t) => {
+      const p = bowlSlotPosition(t.slot);
+      return `${p.x},${p.z}`;
+    });
+    expect(new Set(keys).size).toBe(toppings.length);
+  });
+
+  it.each([4, 6])('lays out %i plates clear of the pizza and each other', (count) => {
+    const plates = platePositions(count);
+    expect(plates).toHaveLength(count);
+    plates.forEach((p, i) => {
+      expect(distXZ(p, PIZZA_CENTER)).toBeGreaterThan(PIZZA_RADIUS + 0.85);
+      for (const other of plates.slice(i + 1)) expect(distXZ(p, other)).toBeGreaterThan(1.6);
+    });
+  });
+
+  it('spreads a row evenly inside the play area', () => {
+    const row = rowPositions(4, 1);
+    [-3.075, -1.025, 1.025, 3.075].forEach((x, i) => expect(row[i]!.x).toBeCloseTo(x));
   });
 });
 

@@ -175,3 +175,94 @@ describe('DragController', () => {
     expect(input.grab(onBowl)).toBe(false);
   });
 });
+
+describe('DragController with existing objects', () => {
+  const plateA: DropZone = {
+    id: 'a',
+    center: vec3(-3, 0, 0),
+    acceptRadius: 1.5,
+    landRadius: 0,
+    surfaceY: 0.08,
+    capacity: 1,
+  };
+  const plateB: DropZone = { ...plateA, id: 'b', center: vec3(-3, 0, 2) };
+  const sliceHome = vec3(0.7, 0, 0.7);
+  let slices: FakePiece[];
+  let moved: number;
+
+  beforeEach(() => {
+    input = new FakeInput();
+    slices = [new FakePiece(), new FakePiece()];
+    moved = 0;
+    const sources: DragSource[] = slices.map((view, i) => ({
+      draggable: { id: `slice-${i}`, home: vec3(sliceHome.x, 0, sliceHome.z + i * 0.01), validZones: ['a', 'b'] },
+      pickRadius: 1,
+      view,
+    }));
+    controller = new DragController(input, sources, [plateA, plateB]);
+    controller.on('moved', () => moved++);
+  });
+
+  it('drags the object itself rather than spawning a copy, and reports movement', () => {
+    expect(input.grab(sliceHome)).toBe(true);
+    input.move(vec3(-1, 0, 0));
+    expect(slices[0]!.position).toEqual(vec3(-1, cfg.lift, cfg.carryOffsetZ));
+    expect(moved).toBe(2);
+  });
+
+  it('returns a missed object home without removing it, ready to grab again', () => {
+    input.grab(sliceHome);
+    input.release(vec3(0, 0, -2));
+    settle();
+    expect(slices[0]!.disposed).toBe(false);
+    expect(slices[0]!.position!.x).toBeCloseTo(sliceHome.x);
+    expect(input.grab(sliceHome)).toBe(true);
+  });
+
+  it('can be caught again in mid-air on its way home', () => {
+    input.grab(sliceHome);
+    input.move(vec3(-1.5, 0, -2.4));
+    input.release(vec3(-1.5, 0, -2.4));
+    controller.update(0.05);
+    expect(input.grab(vec3(-1.5, 0, -2.1))).toBe(true);
+    input.release(fingerFor(-3, 0));
+    settle();
+    expect(slices[0]!.position!.x).toBeCloseTo(-3);
+  });
+
+  it('snaps to the zone centre and retires the object once placed', () => {
+    const placed: string[] = [];
+    controller.on('placed', (e) => placed.push(`${e.sourceId}>${e.zoneId}`));
+    input.grab(sliceHome);
+    input.release(fingerFor(-2.4, 0.5));
+    settle();
+    expect(slices[0]!.position!.x).toBeCloseTo(-3);
+    expect(slices[0]!.position!.y).toBeCloseTo(0.08);
+    expect(placed).toEqual(['slice-0>a']);
+    // The placed slice can no longer be grabbed; the next grab at the pan takes the other one.
+    input.grab(sliceHome);
+    input.move(vec3(1, 0, 1));
+    expect(slices[1]!.position!.x).toBeCloseTo(1);
+  });
+
+  it('sends a second slice to the nearest free plate when the first is full (capacity)', () => {
+    const placed: string[] = [];
+    controller.on('placed', (e) => placed.push(e.zoneId));
+    input.grab(sliceHome);
+    input.release(fingerFor(-3, 0.6));
+    settle();
+    input.grab(sliceHome);
+    input.release(fingerFor(-3, 0.6));
+    settle();
+    expect(placed).toEqual(['a', 'b']);
+  });
+
+  it('finishAll sends a carried object home and leaves nothing mid-air', () => {
+    input.grab(sliceHome);
+    input.move(vec3(-1, 0, -1));
+    controller.finishAll();
+    expect(controller.isDragging).toBe(false);
+    expect(slices[0]!.position!.x).toBeCloseTo(sliceHome.x);
+    expect(slices[0]!.position!.y).toBeCloseTo(0);
+  });
+});

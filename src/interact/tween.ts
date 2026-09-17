@@ -24,6 +24,7 @@ export function dropBounce(t: number): number {
 
 interface Tween {
   elapsed: number;
+  cancelled?: boolean;
   readonly duration: number;
   readonly onUpdate: (t: number) => void;
   readonly onComplete?: () => void;
@@ -37,9 +38,26 @@ export class TweenRunner {
     return this.tweens.length;
   }
 
-  /** `onUpdate` receives linear progress 0..1 and is always called with exactly 1 at the end. */
-  add(duration: number, onUpdate: (t: number) => void, onComplete?: () => void): void {
-    this.tweens.push({ elapsed: 0, duration, onUpdate, onComplete });
+  /**
+   * `onUpdate` receives linear progress 0..1 and is always called with exactly 1 at the end.
+   * Returns a function that cancels the tween without completing it.
+   */
+  add(duration: number, onUpdate: (t: number) => void, onComplete?: () => void): () => void {
+    const tween: Tween = { elapsed: 0, duration, onUpdate, onComplete };
+    this.tweens.push(tween);
+    return () => {
+      tween.cancelled = true;
+    };
+  }
+
+  /** Run `callback` after `seconds`. */
+  delay(seconds: number, callback: () => void): () => void {
+    return this.add(seconds, () => {}, callback);
+  }
+
+  /** Jump every tween, and any they start, to its end. */
+  finishAll(): void {
+    for (let i = 0; i < 100 && this.tweens.length > 0; i++) this.update(Number.MAX_SAFE_INTEGER);
   }
 
   update(dt: number): void {
@@ -48,6 +66,7 @@ export class TweenRunner {
     this.tweens = [];
     const finished: Tween[] = [];
     for (const tween of running) {
+      if (tween.cancelled) continue;
       tween.elapsed += dt;
       if (tween.elapsed >= tween.duration) {
         tween.onUpdate(1);
@@ -58,7 +77,7 @@ export class TweenRunner {
       }
     }
     // Completion callbacks may add new tweens, which land in this.tweens.
-    for (const tween of finished) tween.onComplete?.();
+    for (const tween of finished) if (!tween.cancelled) tween.onComplete?.();
   }
 
   clear(): void {

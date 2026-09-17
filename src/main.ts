@@ -5,6 +5,13 @@ import { screenToPlane } from './core/projection';
 import { StageMachine } from './core/StageMachine';
 import { clientToNdc, landscapeViewport } from './core/viewport';
 import { TouchInput } from './input/TouchInput';
+import gameConfig from './data/game.json';
+import { BakeStage } from './stages/bake/BakeStage';
+import { CelebrateStage } from './stages/celebrate/CelebrateStage';
+import { CutStage } from './stages/cut/CutStage';
+import { PlateStage } from './stages/plate/PlateStage';
+import { SauceStage } from './stages/sauce/SauceStage';
+import { ServeStage } from './stages/serve/ServeStage';
 import { createCounterScene } from './stages/shared/counterScene';
 import type { StageContext } from './stages/StageContext';
 import { ToppingsStage } from './stages/toppings/ToppingsStage';
@@ -57,12 +64,22 @@ function bootstrap(): void {
   const ctx: StageContext = {
     scene: counter.scene,
     input,
-    pizzaZone: counter.pizzaZone,
+    config: gameConfig,
+    pizza: counter.pizza,
+    round: { plates: [], diners: [] },
     layout: () => layout,
     onLayoutChanged: (handler) => layoutEvents.on('changed', handler),
     next: () => machine.advance(),
   };
-  const machine = new StageMachine(ctx).register(new ToppingsStage());
+  // One pizza's journey (X1). After the celebration the loop wraps to a fresh pizza.
+  const machine = new StageMachine(ctx)
+    .register(new SauceStage())
+    .register(new ToppingsStage())
+    .register(new BakeStage())
+    .register(new CutStage())
+    .register(new PlateStage())
+    .register(new ServeStage())
+    .register(new CelebrateStage());
   machine.start();
 
   window.addEventListener('resize', applyLayout);
@@ -73,11 +90,20 @@ function bootstrap(): void {
   });
 
   const debug = new URLSearchParams(location.search).has('debug') ? createDebugReadout() : null;
+  if (debug) Object.assign(window, { pizzaParty: { machine, engine, scene: counter.scene } });
 
   engine.runRenderLoop(() => {
     // Clamp so a backgrounded tab does not fast-forward tweens on return.
     const dt = Math.min(engine.getDeltaTime() / 1000, 0.1);
-    machine.update(dt);
+    try {
+      machine.update(dt);
+    } catch (error) {
+      // The child never sees an error (N6): start over with a fresh pizza.
+      console.error(error);
+      engine.stopRenderLoop();
+      location.reload();
+      return;
+    }
     counter.scene.render();
     debug?.(engine.getFps());
   });

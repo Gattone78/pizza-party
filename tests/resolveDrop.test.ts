@@ -49,6 +49,38 @@ describe('resolveDrop', () => {
   });
 });
 
+describe('resolveDrop with capacity', () => {
+  const plate = (id: string, x: number): DropZone => ({
+    id,
+    center: vec3(x, 0, 0),
+    acceptRadius: 1,
+    landRadius: 0,
+    surfaceY: 0.08,
+    capacity: 1,
+  });
+  const plates = [plate('a', -3), plate('b', 3)];
+  const slice = { validZones: ['a', 'b'] };
+
+  it('snaps to the centre of a free plate', () => {
+    const result = resolveDrop(vec3(-2.6, 0, 0.3), slice, plates, new Map());
+    expect(result).toEqual({ kind: 'zone', zone: plates[0], landAt: vec3(-3, 0.08, 0) });
+  });
+
+  it('sends a drop on a full plate to the nearest free plate, however far', () => {
+    const result = resolveDrop(vec3(-3, 0, 0), slice, plates, new Map([['a', 1]]));
+    expect(result.kind === 'zone' && result.zone.id).toBe('b');
+  });
+
+  it('still goes home when dropped on nothing', () => {
+    expect(resolveDrop(vec3(0, 0, 0), slice, plates, new Map([['a', 1]]))).toEqual({ kind: 'home' });
+  });
+
+  it('goes home when every plate is full', () => {
+    const full = new Map([['a', 1], ['b', 1]]);
+    expect(resolveDrop(vec3(-3, 0, 0), slice, plates, full)).toEqual({ kind: 'home' });
+  });
+});
+
 describe('pickNearest', () => {
   const bowls = [
     { item: 'left', center: vec3(-2, 0.35, -2), pickRadius: 1.5 },

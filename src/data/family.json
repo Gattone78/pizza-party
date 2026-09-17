@@ -1,0 +1,7 @@
+[
+  { "id": "dad", "body": "#3b6fb6", "skin": "#e8b98f", "hair": "#4a3426" },
+  { "id": "mum", "body": "#c2477a", "skin": "#f0c8a0", "hair": "#2b1d14" },
+  { "id": "grandma", "body": "#7a57b3", "skin": "#eac3a0", "hair": "#d9d9d9" },
+  { "id": "grandpa", "body": "#4f8a5b", "skin": "#d9a679", "hair": "#bdbdbd" },
+  { "id": "sibling", "body": "#e08a2e", "skin": "#f0c8a0", "hair": "#c9a227" }
+]

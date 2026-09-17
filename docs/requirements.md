@@ -41,10 +41,10 @@ The pizza starts as plain dough on the counter. The child spreads the sauce and 
 
 ### Stage 0: Sauce and cheese
 
-- G0.1 A ladle sits in a sauce pot. Dragging the ladle over the dough paints sauce wherever it passes.
+- G0.1 A chunky sauce squeeze bottle sits beside the dough. Dragging the bottle over the dough tilts it and squirts sauce, painting wherever it passes.
 - G0.2 Any scribble works. Once about 60% of the dough is covered, the sauce spreads to fill the rest with a satisfying swirl.
 - G0.3 Sauce cannot go outside the crust. Strokes off the pizza do nothing.
-- G0.4 When sauce is done, the ladle hops away and a cheese bowl appears. Only one tool is active at a time.
+- G0.4 When sauce is done, the bottle hops away and a cheese bowl appears. Only one tool is active at a time.
 - G0.5 Dragging from the cheese bowl over the pizza sprinkles cheese along the path. Same 60% auto-fill rule.
 - G0.6 Each has its own sound: a wet "splat" for sauce, a soft sprinkle for cheese.
 - G0.7 When cheese is done, the topping bowls slide in and Stage 1 begins. No "done" button is needed for this stage.
@@ -52,7 +52,7 @@ The pizza starts as plain dough on the counter. The child spreads the sauce and 
 
 ### Stage 1: Toppings
 
-- G1.1 Show 5–6 topping bowls around the pizza (for example pepperoni, mushroom, pepper, olive, pineapple, basil).
+- G1.1 Show 5–6 topping bowls around the pizza (for example tomato, pepperoni, mushroom, pepper, olive, pineapple), arranged around the pizza rather than in one row.
 - G1.2 Dragging from a bowl spawns one topping piece. Bowls never run out.
 - G1.3 A piece dropped over the pizza lands on its surface with a small bounce and a "plop".
 - G1.4 A piece dropped off the pizza hops back to its bowl. Nothing is lost or left on the floor.
@@ -244,4 +244,5 @@ Open questions, most important first:
 - [x] Who gets served? Answered: family-member avatars.
 - [x] Art source? Answered: free asset libraries.
 - [x] Voice prompts? Answered: generated text-to-speech, pre-rendered to audio files.
+- [x] Sauce tool? Answered: a squeeze bottle, not a ladle. Cheese stays painted (G0.5). Tomato joins the MVP toppings. See `docs/art-direction.md`.
 - [x] What next? Answered: a Claude Code build plan and first prompt, in the Build plan tab.

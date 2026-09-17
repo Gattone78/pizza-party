@@ -1,26 +1,8 @@
 [
-  {
-    "id": "pepperoni",
-    "bowlColor": "#c0392b",
-    "pieceColor": "#a3271b",
-    "bowlX": -2.2,
-    "bowlArcZ": 0.35,
-    "validZones": ["pizza"]
-  },
-  {
-    "id": "pepper",
-    "bowlColor": "#27ae60",
-    "pieceColor": "#1e8e4c",
-    "bowlX": 0,
-    "bowlArcZ": 0,
-    "validZones": ["pizza"]
-  },
-  {
-    "id": "pineapple",
-    "bowlColor": "#f1c40f",
-    "pieceColor": "#f5d547",
-    "bowlX": 2.2,
-    "bowlArcZ": 0.35,
-    "validZones": ["pizza"]
-  }
+  { "id": "tomato", "slot": 0, "color": "#e53935", "shape": "disc", "size": 0.34, "validZones": ["pizza"] },
+  { "id": "mushroom", "slot": 1, "color": "#b89b72", "shape": "dome", "size": 0.27, "validZones": ["pizza"] },
+  { "id": "olive", "slot": 2, "color": "#2f2a33", "shape": "ring", "size": 0.22, "validZones": ["pizza"] },
+  { "id": "pepperoni", "slot": 3, "color": "#a3271b", "shape": "disc", "size": 0.26, "validZones": ["pizza"] },
+  { "id": "pepper", "slot": 4, "color": "#2e9e4f", "shape": "ring", "size": 0.3, "validZones": ["pizza"] },
+  { "id": "pineapple", "slot": 5, "color": "#f5d547", "shape": "box", "size": 0.26, "validZones": ["pizza"] }
 ]

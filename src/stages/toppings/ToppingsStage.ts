@@ -1,37 +1,34 @@
-import '@babylonjs/core/Meshes/instancedMesh';
-import type { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh';
+import type { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
+import { Color3 } from '@babylonjs/core/Maths/math.color';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
-import { BOWL_RADIUS, bowlPosition, type CounterLayout } from '../../core/counterLayout';
-import type { Unsubscribe } from '../../core/events';
-import type { Stage } from '../../core/Stage';
-import { lerp, vec3, type Vec3 } from '../../core/vec';
-import toppingData from '../../data/toppings.json';
+import type { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import {
-  DEFAULT_DRAG_CONFIG,
-  DragController,
-  type DragSource,
-  type PieceView,
-} from '../../interact/DragController';
-import { TweenRunner, easeOutBack } from '../../interact/tween';
-import { createBasedCylinder, flatMaterial } from '../shared/greybox';
-import type { StageContext } from '../StageContext';
+  BOWL_RADIUS,
+  FRONT_CENTER,
+  bowlSlotPosition,
+  type CounterLayout,
+} from '../../core/counterLayout';
+import { distXZ, vec3 } from '../../core/vec';
+import toppingData from '../../data/toppings.json';
+import { DEFAULT_DRAG_CONFIG, type DragSource } from '../../interact/DragController';
+import { BaseStage } from '../shared/BaseStage';
+import { NodeView, flatMaterial } from '../shared/greybox';
+import { BOWL_HEIGHT, createBell, createBowl, createPieceSource, type PieceShape } from '../shared/props';
 
 interface ToppingDef {
   readonly id: string;
-  readonly bowlColor: string;
-  readonly pieceColor: string;
-  readonly bowlX: number;
-  readonly bowlArcZ: number;
+  readonly slot: number;
+  readonly color: string;
+  readonly shape: string;
+  readonly size: number;
   readonly validZones: readonly string[];
 }
 
 const TOPPINGS: readonly ToppingDef[] = toppingData;
 
-const BOWL_HEIGHT = 0.35;
-const PIECE_RADIUS = 0.28;
-const PIECE_HEIGHT = 0.08;
 /** Grab radius as a multiple of the visible bowl, so a near miss still grabs (P3). */
 const PICK_RADIUS_FACTOR = 1.5;
+const MAX_BELL_SCALE = 1.2;
 
 interface Bowl {
   readonly def: ToppingDef;
@@ -40,120 +37,115 @@ interface Bowl {
   readonly pieceSource: Mesh;
 }
 
-class InstancePieceView implements PieceView {
-  constructor(
-    private readonly mesh: InstancedMesh,
-    private readonly baseScale: number,
-  ) {}
-
-  setPosition(p: Vec3): void {
-    this.mesh.position.set(p.x, p.y, p.z);
-  }
-
-  setScale(s: number): void {
-    this.mesh.scaling.setAll(s * this.baseScale);
-  }
-
-  dispose(): void {
-    this.mesh.dispose();
-  }
-}
-
-/** Stage 1: drag toppings from never-empty bowls onto the pizza (G1.1 to G1.4). */
-export class ToppingsStage implements Stage<StageContext> {
+/** Stage 1: drag toppings from never-empty bowls onto the pizza, then ring the bell (G1.1 to G1.6). */
+export class ToppingsStage extends BaseStage {
   readonly id = 'toppings';
 
-  private ctx: StageContext | null = null;
-  private controller: DragController | null = null;
-  private readonly tweens = new TweenRunner();
   private bowls: Bowl[] = [];
-  private pieces: PieceView[] = [];
-  private subscriptions: Unsubscribe[] = [];
+  private bell: { node: TransformNode; material: StandardMaterial } | null = null;
+  private placed = 0;
+  private rung = false;
+  private glowTime = 0;
   private pieceCounter = 0;
 
-  enter(ctx: StageContext): void {
-    this.ctx = ctx;
-    this.bowls = TOPPINGS.map((def) => this.createBowl(ctx, def));
+  protected onEnter(): void {
+    const { scene, pizza } = this.ctx;
+    this.placed = 0;
+    this.rung = false;
+    this.glowTime = 0;
 
-    const layout = ctx.layout();
-    this.placeBowls(layout);
-    const controller = new DragController(ctx.input, this.createSources(layout), [ctx.pizzaZone]);
-    this.controller = controller;
+    this.bowls = TOPPINGS.map((def) => {
+      const material = flatMaterial(scene, `toppingMat-${def.id}`, def.color);
+      const mesh = this.own(createBowl(scene, def.id, material));
+      const pieceSource = createPieceSource(scene, `piece-${def.id}`, def.shape as PieceShape, def.size);
+      pieceSource.material = material;
+      pieceSource.isVisible = false;
+      // Landed pieces are instances of this mesh, so it has to outlive the stage.
+      pizza.keepAlive(pieceSource);
+      return { def, mesh, pieceSource };
+    });
 
-    this.subscriptions = [
-      controller.on('grabbed', ({ sourceId }) => this.squashBowl(sourceId)),
-      controller.on('placed', ({ piece }) => this.pieces.push(piece)),
-      ctx.onLayoutChanged((next) => {
-        this.placeBowls(next);
-        controller.setTargets(this.createSources(next), [ctx.pizzaZone]);
+    this.bell = createBell(scene);
+    this.own(this.bell.node);
+    this.bell.material.emissiveColor = Color3.Black();
+
+    const layout = this.ctx.layout();
+    this.place(layout, true);
+    const controller = this.drag(this.createSources(layout), [pizza.zone], DEFAULT_DRAG_CONFIG);
+
+    this.listen(
+      controller.on('grabbed', ({ sourceId }) => {
+        const bowl = this.bowls.find((b) => b.def.id === sourceId);
+        if (bowl) this.squash(bowl.mesh, this.ctx.layout().targetScale);
       }),
-    ];
+    );
+    this.listen(
+      controller.on('placed', ({ piece }) => {
+        if (piece instanceof NodeView) pizza.addTopping(piece.node);
+        this.placed++;
+      }),
+    );
+    this.listen(
+      this.ctx.onLayoutChanged((next) => {
+        this.place(next, false);
+        controller.setTargets(this.createSources(next), [pizza.zone]);
+      }),
+    );
+
+    // The bell is a tap target, not a draggable: touching it is the one big obvious action (P4).
+    this.listen(
+      this.ctx.input.onGrab(({ position }) => {
+        const scale = this.ctx.layout().targetScale;
+        if (controller.isDragging || distXZ(position, FRONT_CENTER) > BOWL_RADIUS * scale * 1.6) return false;
+        if (this.rung) return true;
+        this.rung = true;
+        if (this.bell) this.squash(this.bell.node, Math.min(scale, MAX_BELL_SCALE));
+        // Let pieces still in the air land before the pizza moves on.
+        this.tweens.delay(0.25, () => {
+          this.stopDrag(controller);
+          this.finish();
+        });
+        return true;
+      }),
+    );
   }
 
-  exit(): void {
-    this.subscriptions.forEach((off) => off());
-    this.subscriptions = [];
-    this.controller?.dispose();
-    this.controller = null;
-    this.tweens.clear();
-    this.pieces.forEach((piece) => piece.dispose());
-    this.pieces = [];
-    for (const bowl of this.bowls) {
-      bowl.pieceSource.dispose(false, true);
-      bowl.mesh.dispose(false, true);
+  override update(dt: number): void {
+    super.update(dt);
+    // After the first topping the bell glows with a slow, soft pulse (G1.6, N7).
+    if (this.placed > 0 && this.bell) {
+      this.glowTime += dt;
+      const glow = 0.18 + 0.14 * Math.sin(this.glowTime * 2.2);
+      this.bell.material.emissiveColor.set(glow, glow * 0.7, 0);
     }
+  }
+
+  protected override onExit(): void {
     this.bowls = [];
-    this.ctx = null;
+    this.bell = null;
   }
 
-  update(dt: number): void {
-    this.controller?.update(dt);
-    this.tweens.update(dt);
-  }
-
-  private createBowl(ctx: StageContext, def: ToppingDef): Bowl {
-    const { scene } = ctx;
-    const mesh = createBasedCylinder(scene, `bowl-${def.id}`, {
-      height: BOWL_HEIGHT,
-      diameterTop: BOWL_RADIUS * 2,
-      diameterBottom: BOWL_RADIUS * 1.4,
-    });
-    mesh.material = flatMaterial(scene, `bowlMat-${def.id}`, def.bowlColor);
-
-    const pieceMaterial = flatMaterial(scene, `pieceMat-${def.id}`, def.pieceColor);
-
-    // A disc of the topping colour shows what is in the bowl.
-    const contents = createBasedCylinder(scene, `bowlContents-${def.id}`, {
-      height: 0.04,
-      diameterTop: BOWL_RADIUS * 1.7,
-    });
-    contents.material = pieceMaterial;
-    contents.parent = mesh;
-    contents.position.y = BOWL_HEIGHT;
-
-    const pieceSource = createBasedCylinder(scene, `piece-${def.id}`, {
-      height: PIECE_HEIGHT,
-      diameterTop: PIECE_RADIUS * 2,
-      tessellation: 20,
-    });
-    pieceSource.material = pieceMaterial;
-    pieceSource.isVisible = false;
-
-    return { def, mesh, pieceSource };
-  }
-
-  private placeBowls(layout: CounterLayout): void {
+  private place(layout: CounterLayout, animate: boolean): void {
+    const scale = layout.targetScale;
     for (const bowl of this.bowls) {
-      const p = bowlPosition(bowl.def.bowlX, bowl.def.bowlArcZ, layout.targetScale);
-      bowl.mesh.position.set(p.x, p.y, p.z);
-      bowl.mesh.scaling.setAll(layout.targetScale);
+      const p = bowlSlotPosition(bowl.def.slot);
+      bowl.mesh.position.set(p.x, 0, p.z);
+      if (animate) this.popIn(bowl.mesh, scale);
+      else bowl.mesh.scaling.setAll(scale);
+    }
+    if (this.bell) {
+      // The bell is already big, and must not crowd the pizza on phones.
+      const bellScale = Math.min(scale, MAX_BELL_SCALE);
+      this.bell.node.position.set(FRONT_CENTER.x, 0, FRONT_CENTER.z);
+      if (animate) this.popIn(this.bell.node, bellScale);
+      else this.bell.node.scaling.setAll(bellScale);
     }
   }
 
   private createSources(layout: CounterLayout): DragSource[] {
     const scale = layout.targetScale;
     return this.bowls.map((bowl) => {
-      const p = bowlPosition(bowl.def.bowlX, bowl.def.bowlArcZ, scale);
+      const p = bowlSlotPosition(bowl.def.slot);
       return {
         draggable: {
           id: bowl.def.id,
@@ -164,20 +156,9 @@ export class ToppingsStage implements Stage<StageContext> {
         createPiece: () => {
           const instance = bowl.pieceSource.createInstance(`${bowl.def.id}-${this.pieceCounter++}`);
           instance.isPickable = false;
-          return new InstancePieceView(instance, scale);
+          return new NodeView(instance, scale);
         },
       };
-    });
-  }
-
-  /** Immediate visual answer to a grab (P5): the bowl dips and springs back. */
-  private squashBowl(sourceId: string): void {
-    const bowl = this.bowls.find((b) => b.def.id === sourceId);
-    const scale = this.ctx?.layout().targetScale ?? 1;
-    if (!bowl) return;
-    bowl.mesh.scaling.y = scale * 0.7;
-    this.tweens.add(DEFAULT_DRAG_CONFIG.popDuration * 2, (t) => {
-      bowl.mesh.scaling.y = scale * lerp(0.7, 1, easeOutBack(t));
     });
   }
 }

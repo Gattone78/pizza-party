@@ -1,3 +1,4 @@
+import { CAMERA_PITCH } from '../core/counterLayout';
 import { Emitter, type Unsubscribe } from '../core/events';
 import { lerp, lerpVec, vec3, type Vec3 } from '../core/vec';
 import type { GrabInput } from '../input/GrabInput';
@@ -14,11 +15,18 @@ export interface PieceView {
   dispose(): void;
 }
 
-/** Something pieces are dragged out of, e.g. a topping bowl. It never runs out (G1.2). */
+/**
+ * Something that can be grabbed. With `createPiece` it is a spawner, e.g. a
+ * topping bowl that never runs out (G1.2): each grab makes a new piece, and a
+ * miss sends the piece home and removes it. With `view` it is an existing
+ * object, e.g. a slice, a plate or a tool: a miss sends it home, where it can
+ * be grabbed again, and landing it on a zone retires it.
+ */
 export interface DragSource {
   readonly draggable: Draggable;
   readonly pickRadius: number;
-  createPiece(): PieceView;
+  createPiece?(): PieceView;
+  readonly view?: PieceView;
 }
 
 export interface DragConfig {
@@ -36,19 +44,31 @@ export interface DragConfig {
   readonly hopHeight: number;
 }
 
-export const DEFAULT_DRAG_CONFIG: DragConfig = {
-  lift: 0.5,
-  carryOffsetZ: 0.3,
-  dropOffsetZ: 0.72,
-  stackStep: 0.003,
-  popDuration: 0.12,
-  landDuration: 0.32,
-  returnDuration: 0.45,
-  hopHeight: 0.9,
-};
+/**
+ * A carry configuration. The drop point is where the lifted piece appears to
+ * be on the counter from the fixed camera, so pieces fall where they look.
+ */
+export function carryConfig(lift: number, carryOffsetZ: number, overrides: Partial<DragConfig> = {}): DragConfig {
+  return {
+    lift,
+    carryOffsetZ,
+    dropOffsetZ: carryOffsetZ + lift / Math.tan(CAMERA_PITCH),
+    stackStep: 0,
+    popDuration: 0.12,
+    landDuration: 0.32,
+    returnDuration: 0.45,
+    hopHeight: 0.9,
+    ...overrides,
+  };
+}
+
+export const DEFAULT_DRAG_CONFIG: DragConfig = carryConfig(0.5, 0.3, { stackStep: 0.003 });
 
 export interface DragEvents {
   grabbed: { sourceId: string };
+  /** The drop point under the carried piece, on grab and on every move. */
+  moved: { sourceId: string; position: Vec3 };
+  released: { sourceId: string };
   placed: { sourceId: string; zoneId: string; position: Vec3; piece: PieceView };
   returned: { sourceId: string };
 }
@@ -60,15 +80,19 @@ interface ActiveDrag {
 }
 
 /**
- * Drag-and-drop flow over a GrabInput: grab near a source spawns a piece, it
- * follows the input kinematically, and release either lands it on a valid
- * zone with a bounce or hops it home and removes it (X3, X4). No fail states:
- * every input sequence ends with the piece somewhere sensible.
+ * Drag-and-drop flow over a GrabInput: grab near a source, the piece follows
+ * the input kinematically, and release either lands it on a valid zone with a
+ * bounce or hops it home (X3, X4). No fail states: every input sequence ends
+ * with the piece somewhere sensible.
  */
 export class DragController {
   private readonly events = new Emitter<DragEvents>();
   private readonly tweens = new TweenRunner();
   private readonly subscriptions: Unsubscribe[];
+  private readonly occupancy = new Map<string, number>();
+  private readonly retired = new Set<string>();
+  /** Objects hopping home, with the cancel for that hop so they can be re-grabbed mid-air. */
+  private readonly returning = new Map<string, { cancel: () => void; position: () => Vec3 }>();
   private active: ActiveDrag | null = null;
   private placedCount = 0;
 
@@ -103,9 +127,15 @@ export class DragController {
     this.tweens.update(dt);
   }
 
+  /** Send any carried piece home and jump every tween to its end, so nothing is left mid-air. */
+  finishAll(): void {
+    if (this.active) this.release(null);
+    this.tweens.finishAll();
+  }
+
   dispose(): void {
     this.subscriptions.forEach((off) => off());
-    this.active?.piece.dispose();
+    if (this.active?.source.createPiece) this.active.piece.dispose();
     this.active = null;
     this.tweens.clear();
     this.events.clear();
@@ -115,21 +145,43 @@ export class DragController {
     return vec3(finger.x, this.config.lift, finger.z + this.config.carryOffsetZ);
   }
 
+  private dropPoint(finger: Vec3): Vec3 {
+    return vec3(finger.x, 0, finger.z + this.config.dropOffsetZ);
+  }
+
   private grab(finger: Vec3): boolean {
     if (this.active) return false;
     const source = pickNearest(
-      this.sources.map((s) => ({ item: s, center: s.draggable.home, pickRadius: s.pickRadius })),
+      this.sources
+        .filter((s) => !this.retired.has(s.draggable.id))
+        .flatMap((s) => {
+          // An object hopping home can be caught where it is, or where it is going.
+          const inFlight = this.returning.get(s.draggable.id)?.position();
+          const centers = inFlight ? [inFlight, s.draggable.home] : [s.draggable.home];
+          return centers.map((center) => ({ item: s, center, pickRadius: s.pickRadius }));
+        }),
       finger,
     );
     if (!source) return false;
+    const sourceId = source.draggable.id;
 
-    const piece = source.createPiece();
     const position = this.carryPosition(finger);
+    let piece: PieceView;
+    if (source.createPiece) {
+      piece = source.createPiece();
+      piece.setScale(0.4);
+      this.tweens.add(this.config.popDuration, (t) => piece.setScale(lerp(0.4, 1, easeOutBack(t))));
+    } else if (source.view) {
+      piece = source.view;
+      this.returning.get(sourceId)?.cancel();
+      this.returning.delete(sourceId);
+    } else {
+      return false;
+    }
     piece.setPosition(position);
-    piece.setScale(0.4);
-    this.tweens.add(this.config.popDuration, (t) => piece.setScale(lerp(0.4, 1, easeOutBack(t))));
     this.active = { source, piece, position };
-    this.events.emit('grabbed', { sourceId: source.draggable.id });
+    this.events.emit('grabbed', { sourceId });
+    this.events.emit('moved', { sourceId, position: this.dropPoint(finger) });
     return true;
   }
 
@@ -137,15 +189,22 @@ export class DragController {
     if (!this.active) return;
     this.active.position = this.carryPosition(finger);
     this.active.piece.setPosition(this.active.position);
+    this.events.emit('moved', {
+      sourceId: this.active.source.draggable.id,
+      position: this.dropPoint(finger),
+    });
   }
 
-  private release(finger: Vec3): void {
+  /** `finger` is null when the drag is abandoned, which always sends the piece home. */
+  private release(finger: Vec3 | null): void {
     const drag = this.active;
     if (!drag) return;
     this.active = null;
+    this.events.emit('released', { sourceId: drag.source.draggable.id });
 
-    const dropPoint = vec3(finger.x, 0, finger.z + this.config.dropOffsetZ);
-    const result = resolveDrop(dropPoint, drag.source.draggable, this.zones);
+    const result = finger
+      ? resolveDrop(this.dropPoint(finger), drag.source.draggable, this.zones, this.occupancy)
+      : ({ kind: 'home' } as const);
     if (result.kind === 'zone') {
       const landAt = vec3(
         result.landAt.x,
@@ -153,6 +212,8 @@ export class DragController {
         result.landAt.z,
       );
       this.placedCount++;
+      this.occupancy.set(result.zone.id, (this.occupancy.get(result.zone.id) ?? 0) + 1);
+      if (drag.source.view) this.retired.add(drag.source.draggable.id);
       this.land(drag, landAt, result.zone.id);
     } else {
       this.returnHome(drag);
@@ -182,17 +243,22 @@ export class DragController {
     const from = drag.position;
     const home = drag.source.draggable.home;
     const sourceId = drag.source.draggable.id;
-    this.tweens.add(
+    const spawned = drag.source.createPiece !== undefined;
+    let current = from;
+    const cancel = this.tweens.add(
       this.config.returnDuration,
       (t) => {
         const p = lerpVec(from, home, easeInOutQuad(t));
-        drag.piece.setPosition(vec3(p.x, p.y + hopArc(t) * this.config.hopHeight, p.z));
-        drag.piece.setScale(lerp(1, 0.35, Math.max(0, (t - 0.6) / 0.4)));
+        current = vec3(p.x, p.y + hopArc(t) * this.config.hopHeight, p.z);
+        drag.piece.setPosition(current);
+        if (spawned) drag.piece.setScale(lerp(1, 0.35, Math.max(0, (t - 0.6) / 0.4)));
       },
       () => {
-        drag.piece.dispose();
+        if (spawned) drag.piece.dispose();
+        else this.returning.delete(sourceId);
         this.events.emit('returned', { sourceId });
       },
     );
+    if (!spawned) this.returning.set(sourceId, { cancel, position: () => current });
   }
 }

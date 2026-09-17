@@ -10,4 +10,6 @@ export interface DropZone {
   readonly landRadius: number;
   /** Height at which a landed piece rests. */
   readonly surfaceY: number;
+  /** How many pieces the zone holds, e.g. 1 for a plate. Unlimited if omitted. */
+  readonly capacity?: number;
 }

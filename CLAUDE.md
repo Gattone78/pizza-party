@@ -41,8 +41,10 @@ src/
   core/                StageMachine, Stage interface, events
   input/               GrabInput interface, TouchInput (XRInput comes later)
   interact/            Draggable, DropZone, snap and return-home tweens
-  stages/              one folder per stage
-  data/                toppings.json (later family.json, prompts.json)
+  stages/              one folder per stage: sauce, toppings, bake, cut, plate, serve, celebrate
+    shared/            BaseStage, Pizza (mask texture, toppings, slices), grey-box props, counter scene
+    StageContext.ts    what every stage receives: scene, GrabInput, pizza, round props, config
+  data/                toppings.json, family.json, game.json (later prompts.json)
 tests/
 ```
 
@@ -51,6 +53,10 @@ tests/
 - **Game code never reads raw input.** No pointer, touch, mouse or XR controller events outside `src/input/`. Stages and `src/interact/` consume only the `GrabInput` interface (grab, move, release, each carrying a world-space position). Touch and XR are two implementations behind it (X2). This is what keeps the Quest build cheap.
 - **Stage state machine owns all game flow** (X1). Stages implement the `Stage` interface and are registered with `StageMachine`; adding a stage must not require changing existing ones.
 - **Data-driven drag targets** (X3): each draggable lists its valid drop zones and a fallback home. Toppings, characters and prompts live in `src/data/` so new ones need no code (X5).
+- **Stages extend `BaseStage`** and register everything they create through `own`, `listen` or `drag`, so exit leaves nothing behind (P4). Props that outlive a stage (plates, diners) live in `ctx.round` and are cleared by the Celebrate stage; the `Pizza` persists and is `reset()` for each round.
+- **One `DragController` for every drag**: spawners (bowls), existing objects (slices, plates, the pizza) and tools (bottle, wheel, via `moved` events). Painting coverage (`CoverageGrid`) and cutting (`CutTracker`) are pure logic with tests.
+- Grey-box materials come from `flatMaterial`, which caches by name for the session. Dispose meshes, never materials.
+- **Debugging:** `?debug` shows FPS and exposes `window.pizzaParty.machine`, so `pizzaParty.machine.goTo('plate')` jumps to a stage.
 - **No physics engine** (X4). Objects follow input kinematically and tween to snap points.
 - **Keep logic Babylon-free where possible.** Drop-zone resolution, return-home decisions, tween maths and the StageMachine must not import Babylon, so they run under Vitest without a browser. Babylon-facing code is a thin view layer over that logic.
 - Performance budget on touch: 60 fps, under 150 draw calls, under 200k triangles. Prefer instances and shared materials.

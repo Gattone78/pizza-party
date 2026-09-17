@@ -9,21 +9,40 @@ export type DropResult =
 /**
  * Decide where a released draggable goes. The nearest valid zone whose accept
  * radius contains the release point wins; otherwise it goes home (G1.4).
+ * Zones already holding `capacity` pieces are skipped. A drop on a full zone
+ * with no free zone in reach goes to the nearest free zone anywhere, so a slice
+ * dropped on a taken plate still ends up on a plate (P3).
  */
 export function resolveDrop(
   position: Vec3,
   draggable: Pick<Draggable, 'validZones'>,
   zones: readonly DropZone[],
+  occupancy?: ReadonlyMap<string, number>,
 ): DropResult {
   let best: DropZone | null = null;
   let bestDistance = Infinity;
+  let nearestFree: DropZone | null = null;
+  let nearestFreeDistance = Infinity;
+  let onFullZone = false;
   for (const zone of zones) {
     if (!draggable.validZones.includes(zone.id)) continue;
     const d = distXZ(position, zone.center);
+    if (zone.capacity !== undefined && (occupancy?.get(zone.id) ?? 0) >= zone.capacity) {
+      if (d <= zone.acceptRadius) onFullZone = true;
+      continue;
+    }
+    if (d < nearestFreeDistance) {
+      nearestFree = zone;
+      nearestFreeDistance = d;
+    }
     if (d <= zone.acceptRadius && d < bestDistance) {
       best = zone;
       bestDistance = d;
     }
+  }
+  if (!best && onFullZone && nearestFree) {
+    best = nearestFree;
+    bestDistance = nearestFreeDistance;
   }
   if (!best) return { kind: 'home' };
 
