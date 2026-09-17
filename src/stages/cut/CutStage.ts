@@ -1,12 +1,13 @@
 import { CreateBox } from '@babylonjs/core/Meshes/Builders/boxBuilder';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { FRONT_CENTER, PIZZA_RADIUS } from '../../core/counterLayout';
-import { lerp } from '../../core/vec';
+import { lerp, vec3 } from '../../core/vec';
 import { CutTracker, guideAngle, sliceOffset } from '../../interact/CutTracker';
 import { carryConfig, type DragSource } from '../../interact/DragController';
 import { easeOutCubic } from '../../interact/tween';
 import { BaseStage } from '../shared/BaseStage';
 import { NodeView, flatMaterial } from '../shared/greybox';
+import type { Hint } from '../shared/HintLayer';
 import type { PizzaSlice } from '../shared/Pizza';
 import { createWheel } from '../shared/props';
 
@@ -22,12 +23,28 @@ export class CutStage extends BaseStage {
   readonly id = 'cut';
   private guides: Mesh[] = [];
   private glowTime = 0;
+  private tracker: CutTracker | null = null;
+
+  /** Swipe the hand along the next guide that still needs cutting. */
+  protected override hint(): Hint | null {
+    const tracker = this.tracker;
+    if (!tracker || tracker.done) return null;
+    const guides = Array.from({ length: tracker.cuts }, (_, i) => i);
+    const a = guideAngle(guides.find((i) => !tracker.completed.has(i)) ?? 0, tracker.cuts);
+    const c = this.ctx.pizza.home;
+    const reach = PIZZA_RADIUS * 1.05;
+    return {
+      from: vec3(c.x - Math.cos(a) * reach, 0, c.z - Math.sin(a) * reach),
+      to: vec3(c.x + Math.cos(a) * reach, 0, c.z + Math.sin(a) * reach),
+    };
+  }
 
   protected onEnter(): void {
     const { scene, pizza, config } = this.ctx;
     const scale = this.ctx.layout().targetScale;
     const slices = pizza.slice(config.cuts);
     const tracker = new CutTracker(config.cuts, PIZZA_RADIUS);
+    this.tracker = tracker;
     this.glowTime = 0;
 
     const guideMaterial = flatMaterial(scene, 'guideMat', '#fff3a0', true);
@@ -54,10 +71,15 @@ export class CutStage extends BaseStage {
       pickRadius: 100,
       view: new NodeView(wheel, scale, false),
     };
-    const controller = this.drag([source], [], carryConfig(0.15, 0.2));
+    const controller = this.drag([source], [], carryConfig(0.15, 0.2, { carryScale: 1 }), {
+      sounds: { grabbed: 'grab' },
+    });
+    this.announce('cut');
 
     const cut = (index: number): void => {
       this.guides[index]?.setEnabled(false);
+      this.ctx.audio.play('slice');
+      this.ctx.audio.buzz();
       this.part(slices, tracker);
       if (tracker.done) {
         this.stopDrag(controller);
@@ -82,6 +104,7 @@ export class CutStage extends BaseStage {
   }
 
   protected override onExit(): void {
+    this.tracker = null;
     this.guides = [];
   }
 

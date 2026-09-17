@@ -6,6 +6,7 @@ import type { DropZone } from '../../interact/DropZone';
 import { easeOutCubic } from '../../interact/tween';
 import { BaseStage } from '../shared/BaseStage';
 import { NodeView } from '../shared/greybox';
+import type { Hint } from '../shared/HintLayer';
 import { PLATE_HEIGHT, createPlate } from '../shared/props';
 import type { PlateProp } from '../StageContext';
 
@@ -16,6 +17,15 @@ const PLATED_SCALE = 0.7;
 /** Stage 4: one plate per slice; drag each slice to any plate (G4.1 to G4.4). */
 export class PlateStage extends BaseStage {
   readonly id = 'plate';
+  private nextHint: (() => Hint | null) | null = null;
+
+  protected override hint(): Hint | null {
+    return this.nextHint?.() ?? null;
+  }
+
+  protected override onExit(): void {
+    this.nextHint = null;
+  }
 
   protected onEnter(): void {
     const { scene, pizza, config, round } = this.ctx;
@@ -53,13 +63,27 @@ export class PlateStage extends BaseStage {
     // Dragged slices leave the pizza so they move in counter coordinates.
     slices.forEach((slice) => slice.node.setParent(null));
 
-    const controller = this.drag(sources, zones, carryConfig(0.35, 0.15));
+    const controller = this.drag(sources, zones, carryConfig(0.35, 0.15), {
+      sounds: { grabbed: 'pop', placed: 'clink', returned: 'boing' },
+      effects: {},
+    });
+    this.announce('plate');
     let plated = 0;
+    const platedSlices = new Set<string>();
+    // Point from a slice still in the pan to a plate that is still empty.
+    this.nextHint = () => {
+      const source = sources.find((s) => !platedSlices.has(s.draggable.id));
+      const plate = plates.find((p) => p.slice === null);
+      if (!source || !plate) return null;
+      const center = vec3(plate.node.position.x, 0, plate.node.position.z);
+      return { from: source.draggable.home, to: center, ring: { center, radius: PLATE_RADIUS } };
+    };
     this.listen(
       controller.on('placed', ({ sourceId, zoneId }) => {
         const slice = slices.find((s) => `slice-${s.index}` === sourceId);
         const plate = plates.find((p) => p.id === zoneId);
         if (!slice || !plate) return;
+        platedSlices.add(sourceId);
         slice.node.setParent(plate.node);
         plate.slice = slice.node;
         this.tweens.add(0.2, (t) => slice.node.scaling.setAll(lerp(1, PLATED_SCALE, easeOutCubic(t))));

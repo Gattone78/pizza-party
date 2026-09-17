@@ -5,6 +5,7 @@ import { carryConfig, type DragSource } from '../../interact/DragController';
 import type { DropZone } from '../../interact/DropZone';
 import { easeInOutQuad, hopArc } from '../../interact/tween';
 import { BaseStage } from '../shared/BaseStage';
+import type { Hint } from '../shared/HintLayer';
 import { createDiner, type DinerLook } from '../shared/props';
 import type { DinerProp } from '../StageContext';
 
@@ -16,6 +17,15 @@ const PLATE_ROW_Z = -1.75;
 /** Stage 5: family members sit along the far side; drag any plate to any of them (G5.1 to G5.3). */
 export class ServeStage extends BaseStage {
   readonly id = 'serve';
+  private nextHint: (() => Hint | null) | null = null;
+
+  protected override hint(): Hint | null {
+    return this.nextHint?.() ?? null;
+  }
+
+  protected override onExit(): void {
+    this.nextHint = null;
+  }
 
   protected onEnter(): void {
     const { scene, round } = this.ctx;
@@ -61,13 +71,29 @@ export class ServeStage extends BaseStage {
       view: plate.view,
     }));
 
-    const controller = this.drag(sources, zones, carryConfig(0.35, 0.15));
+    const controller = this.drag(sources, zones, carryConfig(0.35, 0.15), {
+      sounds: { grabbed: 'pop', placed: 'clink', returned: 'boing' },
+      effects: {},
+    });
+    this.announce('serve');
     let served = 0;
+    const servedPlates = new Set<string>();
+    const fedDiners = new Set<string>();
+    // Point from a plate still waiting to someone still hungry.
+    this.nextHint = () => {
+      const source = sources.find((s) => !servedPlates.has(s.draggable.id));
+      const zone = zones.find((z) => !fedDiners.has(z.id));
+      if (!source || !zone) return null;
+      return { from: source.draggable.home, to: zone.center, ring: { center: zone.center, radius: 0.95 } };
+    };
     this.listen(
       controller.on('placed', ({ sourceId, zoneId }) => {
         const plate = plates.find((p) => p.id === sourceId);
         const diner = diners.find((d) => d.id === zoneId);
+        servedPlates.add(sourceId);
+        fedDiners.add(zoneId);
         if (diner) this.cheer(diner);
+        this.tweens.delay(0.3, () => this.ctx.audio.play('yum'));
         const slice = plate?.slice;
         if (slice) {
           // Eaten, bite by bite.

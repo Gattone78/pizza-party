@@ -38,6 +38,8 @@ export interface DragConfig {
   readonly dropOffsetZ: number;
   /** Each landed piece rests this much higher than the last, to avoid z-fighting. */
   readonly stackStep: number;
+  /** Carried things are shown a little bigger so it is obvious what is in hand (P5). */
+  readonly carryScale: number;
   readonly popDuration: number;
   readonly landDuration: number;
   readonly returnDuration: number;
@@ -54,6 +56,7 @@ export function carryConfig(lift: number, carryOffsetZ: number, overrides: Parti
     carryOffsetZ,
     dropOffsetZ: carryOffsetZ + lift / Math.tan(CAMERA_PITCH),
     stackStep: 0,
+    carryScale: 1.12,
     popDuration: 0.12,
     landDuration: 0.32,
     returnDuration: 0.45,
@@ -65,10 +68,10 @@ export function carryConfig(lift: number, carryOffsetZ: number, overrides: Parti
 export const DEFAULT_DRAG_CONFIG: DragConfig = carryConfig(0.5, 0.3, { stackStep: 0.003 });
 
 export interface DragEvents {
-  grabbed: { sourceId: string };
-  /** The drop point under the carried piece, on grab and on every move. */
-  moved: { sourceId: string; position: Vec3 };
-  released: { sourceId: string };
+  grabbed: { sourceId: string; piece: PieceView };
+  /** On grab and every move: `position` is the drop point on the counter, `carried` is the piece itself. */
+  moved: { sourceId: string; position: Vec3; carried: Vec3 };
+  released: { sourceId: string; piece: PieceView };
   placed: { sourceId: string; zoneId: string; position: Vec3; piece: PieceView };
   returned: { sourceId: string };
 }
@@ -170,18 +173,21 @@ export class DragController {
     if (source.createPiece) {
       piece = source.createPiece();
       piece.setScale(0.4);
-      this.tweens.add(this.config.popDuration, (t) => piece.setScale(lerp(0.4, 1, easeOutBack(t))));
     } else if (source.view) {
       piece = source.view;
       this.returning.get(sourceId)?.cancel();
       this.returning.delete(sourceId);
+      piece.setScale(1);
     } else {
       return false;
     }
+    const fromScale = source.createPiece ? 0.4 : 1;
+    const carryScale = this.config.carryScale;
+    this.tweens.add(this.config.popDuration, (t) => piece.setScale(lerp(fromScale, carryScale, easeOutBack(t))));
     piece.setPosition(position);
     this.active = { source, piece, position };
-    this.events.emit('grabbed', { sourceId });
-    this.events.emit('moved', { sourceId, position: this.dropPoint(finger) });
+    this.events.emit('grabbed', { sourceId, piece });
+    this.events.emit('moved', { sourceId, position: this.dropPoint(finger), carried: position });
     return true;
   }
 
@@ -192,6 +198,7 @@ export class DragController {
     this.events.emit('moved', {
       sourceId: this.active.source.draggable.id,
       position: this.dropPoint(finger),
+      carried: this.active.position,
     });
   }
 
@@ -200,7 +207,7 @@ export class DragController {
     const drag = this.active;
     if (!drag) return;
     this.active = null;
-    this.events.emit('released', { sourceId: drag.source.draggable.id });
+    this.events.emit('released', { sourceId: drag.source.draggable.id, piece: drag.piece });
 
     const result = finger
       ? resolveDrop(this.dropPoint(finger), drag.source.draggable, this.zones, this.occupancy)
@@ -227,6 +234,7 @@ export class DragController {
       this.config.landDuration,
       (t) => {
         const slide = easeOutCubic(Math.min(1, t / 0.55));
+        drag.piece.setScale(lerp(this.config.carryScale, 1, slide));
         drag.piece.setPosition(
           vec3(
             lerp(from.x, landAt.x, slide),
@@ -251,7 +259,8 @@ export class DragController {
         const p = lerpVec(from, home, easeInOutQuad(t));
         current = vec3(p.x, p.y + hopArc(t) * this.config.hopHeight, p.z);
         drag.piece.setPosition(current);
-        if (spawned) drag.piece.setScale(lerp(1, 0.35, Math.max(0, (t - 0.6) / 0.4)));
+        const shrink = Math.max(0, (t - 0.6) / 0.4);
+        drag.piece.setScale(lerp(this.config.carryScale, spawned ? 0.35 : 1, spawned ? shrink : t));
       },
       () => {
         if (spawned) drag.piece.dispose();

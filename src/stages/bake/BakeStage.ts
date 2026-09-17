@@ -6,6 +6,7 @@ import type { DropZone } from '../../interact/DropZone';
 import { easeOutCubic } from '../../interact/tween';
 import { BaseStage } from '../shared/BaseStage';
 import { flatMaterial } from '../shared/greybox';
+import type { Hint } from '../shared/HintLayer';
 import { createOven, type OvenProp } from '../shared/props';
 
 const OVEN_SIZE = PIZZA_RADIUS * 2 + 0.3;
@@ -22,10 +23,23 @@ export class BakeStage extends BaseStage {
   readonly id = 'bake';
   private glowTime = 0;
   private baking: OvenProp | null = null;
+  private waitingForPush = false;
+  private lastTick = 0;
+
+  protected override hint(): Hint | null {
+    if (!this.waitingForPush) return null;
+    const oven = vec3(OVEN_X, 0, PIZZA_CENTER.z);
+    return {
+      from: vec3(PIZZA_START_X, 0, PIZZA_CENTER.z),
+      to: vec3(OVEN_X - OVEN_SIZE / 2 + 0.6, 0, PIZZA_CENTER.z),
+      ring: { center: oven, radius: PIZZA_RADIUS },
+    };
+  }
 
   protected onEnter(): void {
     const { scene, pizza } = this.ctx;
     this.baking = null;
+    this.waitingForPush = false;
     this.glowTime = 0;
 
     const oven = createOven(scene, OVEN_SIZE, OVEN_HEIGHT);
@@ -56,9 +70,15 @@ export class BakeStage extends BaseStage {
       pickRadius: PIZZA_RADIUS + 0.4,
       view: pizza.view,
     };
-    const controller = this.drag([source], [zone], carryConfig(0.04, 0, { landDuration: 0.55, hopHeight: 0.15 }));
+    const config = carryConfig(0.04, 0, { landDuration: 0.55, hopHeight: 0.15, carryScale: 1 });
+    const controller = this.drag([source], [zone], config, {
+      sounds: { grabbed: 'grab', placed: 'thunk', returned: 'boing' },
+    });
+    this.waitingForPush = true;
+    this.announce('bake');
     this.listen(
       controller.on('placed', () => {
+        this.waitingForPush = false;
         this.stopDrag(controller);
         this.bake(oven);
       }),
@@ -68,6 +88,7 @@ export class BakeStage extends BaseStage {
   private bake(oven: OvenProp): void {
     const { pizza, config } = this.ctx;
     const door = (from: number, to: number, then: () => void): void => {
+      this.ctx.audio.play('door');
       this.tweens.add(
         0.4,
         (t) => {
@@ -80,15 +101,27 @@ export class BakeStage extends BaseStage {
 
     door(0.02, 1, () => {
       this.baking = oven;
+      this.lastTick = -1;
       this.tweens.add(
         config.bakeSeconds,
-        (t) => pizza.setBaked(t),
+        (t) => {
+          pizza.setBaked(t);
+          // A kitchen-timer tick once a second, then the ding (G2.3).
+          const second = Math.floor(t * config.bakeSeconds);
+          if (second !== this.lastTick) {
+            this.lastTick = second;
+            this.ctx.audio.play('tick');
+          }
+        },
         () => {
           this.baking = null;
+          this.ctx.audio.play('ding');
+          this.ctx.audio.say('baked');
           oven.glass.emissiveColor.set(0.25, 0.1, 0);
           door(1, 0.02, () => {
             this.slide(pizza.root, pizza.home, 0.8, () => {
               this.steam();
+              this.ctx.audio.play('steam');
               this.slide(oven.node, { x: OFFSTAGE_X, z: PIZZA_CENTER.z }, 0.5);
               this.finish(1.2);
             });

@@ -18,6 +18,8 @@ export class CelebrateStage extends BaseStage {
   protected onEnter(): void {
     const { scene, config } = this.ctx;
     this.time = 0;
+    this.ctx.audio.play('fanfare');
+    this.tweens.delay(0.8, () => this.ctx.audio.say('celebrate'));
 
     COLORS.forEach((color, c) => {
       const source = this.own(CreateBox(`confetti-${c}`, { width: 0.22, depth: 0.14, height: 0.03 }, scene));

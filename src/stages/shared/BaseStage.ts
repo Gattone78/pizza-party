@@ -1,12 +1,23 @@
 import '@babylonjs/core/Meshes/instancedMesh';
 import type { TransformNode } from '@babylonjs/core/Meshes/transformNode';
+import { DEFAULT_DRAG_SOUNDS, wireDragSounds, type DragSoundMap } from '../../audio/dragSounds';
 import type { Unsubscribe } from '../../core/events';
+import { IdleTimer } from '../../core/IdleTimer';
 import type { Stage } from '../../core/Stage';
 import { lerp } from '../../core/vec';
 import { DragController, type DragConfig, type DragSource } from '../../interact/DragController';
 import type { DropZone } from '../../interact/DropZone';
 import { TweenRunner, easeInOutQuad, easeOutBack, hopArc } from '../../interact/tween';
 import type { StageContext } from '../StageContext';
+import { CarryEffects, type CarryEffectOptions } from './CarryEffects';
+import { HintLayer, type Hint } from './HintLayer';
+
+export interface DragOptions {
+  /** Sounds for grab, drop and miss. Null for a tool that makes its own noises. */
+  readonly sounds?: DragSoundMap | null;
+  /** Halo and sparkles on the carried piece. Omit for tools. */
+  readonly effects?: CarryEffectOptions;
+}
 
 /**
  * Housekeeping shared by every stage: everything registered through `own`,
@@ -20,10 +31,28 @@ export abstract class BaseStage implements Stage<StageContext> {
   private cleanups: (() => void)[] = [];
   private controllers: DragController[] = [];
   private finished = false;
+  private hints: HintLayer | null = null;
+  private idlePrompt: string | null = null;
+  private readonly idle = new IdleTimer(() => this.showHint());
 
   enter(ctx: StageContext): void {
     this.ctx = ctx;
     this.finished = false;
+    this.idlePrompt = null;
+    this.idle.poke();
+    this.hints = this.own(new HintLayer(ctx.scene));
+    // Any touch, claimed or not, means the child is busy: hints wait and get out of the way (P7).
+    const busy = (): void => {
+      this.idle.poke();
+      this.hints?.cancel();
+    };
+    this.listen(
+      ctx.input.onGrab(() => {
+        busy();
+        return false;
+      }),
+    );
+    this.listen(ctx.input.onMove(busy));
     this.onEnter();
   }
 
@@ -39,11 +68,36 @@ export abstract class BaseStage implements Stage<StageContext> {
   update(dt: number): void {
     this.controllers.forEach((c) => c.update(dt));
     this.tweens.update(dt);
+    this.idle.update(dt);
     this.ctx.pizza.flush();
   }
 
   protected abstract onEnter(): void;
   protected onExit(): void {}
+
+  /**
+   * What to show after 10 idle seconds, given the state of play right now.
+   * Null while there is nothing for the child to do (e.g. while baking).
+   */
+  protected hint(): Hint | null {
+    return null;
+  }
+
+  /** Speak a prompt now, and again with each idle hint until the next one (A5). */
+  protected announce(promptId: string): void {
+    this.idlePrompt = promptId;
+    this.idle.poke();
+    this.ctx.audio.say(promptId);
+  }
+
+  private showHint(): void {
+    const hint = this.finished ? null : this.hint();
+    if (!hint || this.controllers.some((c) => c.isDragging)) return;
+    this.hints?.play(hint, this.tweens);
+    this.ctx.audio.play('hint');
+    const prompt = hint.prompt ?? this.idlePrompt;
+    if (prompt) this.ctx.audio.say(prompt);
+  }
 
   /** Dispose `item` when the stage exits. */
   protected own<T extends { dispose(): void }>(item: T): T {
@@ -55,9 +109,17 @@ export abstract class BaseStage implements Stage<StageContext> {
     this.cleanups.push(off);
   }
 
-  protected drag(sources: readonly DragSource[], zones: readonly DropZone[], config: DragConfig): DragController {
+  protected drag(
+    sources: readonly DragSource[],
+    zones: readonly DropZone[],
+    config: DragConfig,
+    options: DragOptions = {},
+  ): DragController {
     const controller = new DragController(this.ctx.input, sources, zones, config);
     this.controllers.push(controller);
+    const sounds = options.sounds === undefined ? DEFAULT_DRAG_SOUNDS : options.sounds;
+    if (sounds) this.listen(wireDragSounds(controller, this.ctx.audio, sounds));
+    if (options.effects) this.own(new CarryEffects(this.ctx.scene, controller, this.tweens, options.effects));
     return controller;
   }
 

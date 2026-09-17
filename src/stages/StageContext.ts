@@ -1,5 +1,6 @@
 import type { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import type { Scene } from '@babylonjs/core/scene';
+import type { GameAudio } from '../audio/GameAudio';
 import type { CounterLayout } from '../core/counterLayout';
 import type { Unsubscribe } from '../core/events';
 import type { GrabInput } from '../input/GrabInput';
@@ -37,6 +38,8 @@ export interface RoundProps {
 export interface StageContext {
   readonly scene: Scene;
   readonly input: GrabInput;
+  /** Sounds, spoken prompts and haptics. */
+  readonly audio: GameAudio;
   readonly config: GameConfig;
   /** The pizza persists across stages. */
   readonly pizza: Pizza;

@@ -52,6 +52,18 @@ describe('CutTracker', () => {
     expect(tracker.done).toBe(true);
   });
 
+  it('cuts on a fast swipe that arrives as just two samples outside the pizza', () => {
+    const tracker = new CutTracker(2, R);
+    expect(swipe(tracker, { x: 0, z: 2.6 }, { x: 0, z: -2.4 }, 1)).toEqual([1]);
+  });
+
+  it('does not join separate strokes into one path', () => {
+    const tracker = new CutTracker(2, R);
+    swipe(tracker, { x: -1.5, z: 1.2 }, { x: -1.45, z: 1.2 }, 1);
+    expect(swipe(tracker, { x: 1.5, z: -1.2 }, { x: 1.45, z: -1.2 }, 1)).toEqual([]);
+    expect(tracker.completed.size).toBe(0);
+  });
+
   it('ignores taps and swipes that miss the pizza', () => {
     const tracker = new CutTracker(2, R);
     expect(swipe(tracker, { x: 0.2, z: 0.2 }, { x: 0.25, z: 0.2 })).toEqual([]);

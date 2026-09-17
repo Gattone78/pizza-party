@@ -5,6 +5,7 @@ import type { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import {
   BOWL_RADIUS,
   FRONT_CENTER,
+  PIZZA_RADIUS,
   bowlSlotPosition,
   type CounterLayout,
 } from '../../core/counterLayout';
@@ -13,6 +14,7 @@ import toppingData from '../../data/toppings.json';
 import { DEFAULT_DRAG_CONFIG, type DragSource } from '../../interact/DragController';
 import { BaseStage } from '../shared/BaseStage';
 import { NodeView, flatMaterial } from '../shared/greybox';
+import type { Hint } from '../shared/HintLayer';
 import { BOWL_HEIGHT, createBell, createBowl, createPieceSource, type PieceShape } from '../shared/props';
 
 interface ToppingDef {
@@ -71,7 +73,12 @@ export class ToppingsStage extends BaseStage {
 
     const layout = this.ctx.layout();
     this.place(layout, true);
-    const controller = this.drag(this.createSources(layout), [pizza.zone], DEFAULT_DRAG_CONFIG);
+    const controller = this.drag(this.createSources(layout), [pizza.zone], DEFAULT_DRAG_CONFIG, {
+      effects: {
+        halo: (sourceId) => (TOPPINGS.find((t) => t.id === sourceId)?.size ?? 0.3) * 1.4,
+      },
+    });
+    this.announce('toppings');
 
     this.listen(
       controller.on('grabbed', ({ sourceId }) => {
@@ -99,6 +106,8 @@ export class ToppingsStage extends BaseStage {
         if (controller.isDragging || distXZ(position, FRONT_CENTER) > BOWL_RADIUS * scale * 1.6) return false;
         if (this.rung) return true;
         this.rung = true;
+        this.ctx.audio.play('bell');
+        this.ctx.audio.buzz();
         if (this.bell) this.squash(this.bell.node, Math.min(scale, MAX_BELL_SCALE));
         // Let pieces still in the air land before the pizza moves on.
         this.tweens.delay(0.25, () => {
@@ -108,6 +117,28 @@ export class ToppingsStage extends BaseStage {
         return true;
       }),
     );
+  }
+
+  /** First show how toppings work; once there are some, show the bell (G1.6). */
+  protected override hint(): Hint | null {
+    if (this.rung) return null;
+    if (this.placed > 0) {
+      const scale = Math.min(this.ctx.layout().targetScale, MAX_BELL_SCALE);
+      return {
+        from: FRONT_CENTER,
+        to: FRONT_CENTER,
+        ring: { center: FRONT_CENTER, radius: BOWL_RADIUS * scale * 1.25 },
+        prompt: 'bell',
+      };
+    }
+    const bowl = this.bowls[Math.floor(Math.random() * this.bowls.length)];
+    if (!bowl) return null;
+    const { zone } = this.ctx.pizza;
+    return {
+      from: bowlSlotPosition(bowl.def.slot),
+      to: zone.center,
+      ring: { center: zone.center, radius: PIZZA_RADIUS },
+    };
   }
 
   override update(dt: number): void {

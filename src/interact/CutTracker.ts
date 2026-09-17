@@ -70,6 +70,7 @@ export class CutTracker {
   private readonly progress: GuideProgress[];
   private readonly options: CutTrackerOptions;
   private strokeStart: Point2 | null = null;
+  private lastSample: Point2 | null = null;
   private last: Point2 | null = null;
   private strokeLength = 0;
   private strokeCut = false;
@@ -87,8 +88,25 @@ export class CutTracker {
     return this.completed.size >= this.cuts;
   }
 
-  /** Feed the wheel position. Returns the guides completed by this movement. */
+  /**
+   * Feed the wheel position. Returns the guides completed by this movement.
+   * The path from the previous position is filled in, so a fast swipe that
+   * arrives as two far-apart samples still cuts.
+   */
   track(p: Point2): number[] {
+    const from = this.lastSample;
+    this.lastSample = p;
+    if (!from) return this.visit(p);
+    const steps = Math.max(1, Math.ceil(Math.hypot(p.x - from.x, p.z - from.z) / (this.radius * 0.1)));
+    const finished: number[] = [];
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      finished.push(...this.visit({ x: from.x + (p.x - from.x) * t, z: from.z + (p.z - from.z) * t }));
+    }
+    return finished;
+  }
+
+  private visit(p: Point2): number[] {
     const overPizza = Math.hypot(p.x, p.z) <= this.radius;
     if (overPizza) {
       if (this.last) this.strokeLength += Math.hypot(p.x - this.last.x, p.z - this.last.z);
@@ -120,6 +138,7 @@ export class CutTracker {
     const end = this.last;
     const eligible = !this.strokeCut && this.strokeLength >= this.options.minSwipe && !this.done;
     this.strokeStart = null;
+    this.lastSample = null;
     this.last = null;
     this.strokeLength = 0;
     this.strokeCut = false;

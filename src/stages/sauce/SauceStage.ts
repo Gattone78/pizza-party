@@ -1,11 +1,13 @@
 import { CreateSphere } from '@babylonjs/core/Meshes/Builders/sphereBuilder';
-import { BOWL_RADIUS, PLAY_AREA, TOOL_HOME } from '../../core/counterLayout';
+import type { SoundId } from '../../audio/GameAudio';
+import { BOWL_RADIUS, PIZZA_CENTER, PIZZA_RADIUS, PLAY_AREA, TOOL_HOME } from '../../core/counterLayout';
 import { vec3 } from '../../core/vec';
 import { CoverageGrid, strokePoints } from '../../interact/CoverageGrid';
 import type { Point2 } from '../../interact/CutTracker';
 import { carryConfig, type DragController, type DragSource } from '../../interact/DragController';
 import { BaseStage } from '../shared/BaseStage';
 import { NodeView, flatMaterial } from '../shared/greybox';
+import type { Hint } from '../shared/HintLayer';
 import { CHEESE_BRUSH, PIZZA_TOP_RADIUS, SAUCE_BRUSH } from '../shared/Pizza';
 import { BOTTLE_HEIGHT, BOWL_HEIGHT, createBottle, createBowl } from '../shared/props';
 
@@ -19,8 +21,20 @@ const OFFSTAGE_X = PLAY_AREA.minX - 3;
  */
 export class SauceStage extends BaseStage {
   readonly id = 'sauce';
+  private painting = false;
+
+  /** Show the scribble: from the tool across the pizza. */
+  protected override hint(): Hint | null {
+    if (!this.painting) return null;
+    return {
+      from: TOOL_HOME,
+      to: vec3(PIZZA_CENTER.x + 0.6, 0, PIZZA_CENTER.z),
+      ring: { center: PIZZA_CENTER, radius: PIZZA_RADIUS },
+    };
+  }
 
   protected onEnter(): void {
+    this.painting = false;
     // Every round starts from plain dough, however the last one ended (G6.2, N6).
     this.ctx.pizza.reset();
     this.startSauce();
@@ -40,7 +54,11 @@ export class SauceStage extends BaseStage {
       view: new NodeView(node, scale, false),
     };
     // The nozzle, not the finger, is the paint point, and it sits a little up-screen of the finger.
-    const controller = this.drag([source], [], carryConfig(0.12, 0.35));
+    const controller = this.drag([source], [], carryConfig(0.12, 0.35, { carryScale: 1 }), {
+      sounds: { grabbed: 'grab', returned: 'boing' },
+    });
+    this.painting = true;
+    this.announce('sauce');
 
     const upright = (): void => {
       body.rotation.z = 0;
@@ -54,9 +72,11 @@ export class SauceStage extends BaseStage {
     this.listen(controller.on('grabbed', tipped));
     this.listen(controller.on('released', upright));
 
-    this.paintWith(controller, SAUCE_BRUSH, (p) => pizza.paintSauce(p), () => {
+    this.paintWith(controller, SAUCE_BRUSH, 'squirt', (p) => pizza.paintSauce(p), () => {
+      this.painting = false;
       this.stopDrag(controller);
       upright();
+      this.ctx.audio.play('swirl');
       this.tweens.add(0.7, (t) => pizza.fillSauce(t));
       this.hopAway(node, OFFSTAGE_X, () => this.startCheese());
     });
@@ -82,11 +102,15 @@ export class SauceStage extends BaseStage {
       pickRadius: BOWL_RADIUS * scale * 1.6,
       createPiece: () => new NodeView(pinch.createInstance(`cheesePinch-${count++}`), scale),
     };
-    const controller = this.drag([source], [], carryConfig(0.4, 0.3));
+    const controller = this.drag([source], [], carryConfig(0.4, 0.3), { sounds: { grabbed: 'pop' } });
     this.listen(controller.on('grabbed', () => this.squash(bowl, scale)));
+    this.painting = true;
+    this.announce('cheese');
 
-    this.paintWith(controller, CHEESE_BRUSH, (p) => pizza.paintCheese(p), () => {
+    this.paintWith(controller, CHEESE_BRUSH, 'sprinkle', (p) => pizza.paintCheese(p), () => {
+      this.painting = false;
       this.stopDrag(controller);
+      this.ctx.audio.play('swirl');
       this.tweens.add(0.7, () => pizza.fillCheese());
       this.hopAway(bowl, OFFSTAGE_X, () => this.finish());
     });
@@ -96,6 +120,7 @@ export class SauceStage extends BaseStage {
   private paintWith(
     controller: DragController,
     brush: number,
+    sound: SoundId,
     paint: (p: Point2) => void,
     onCovered: () => void,
   ): void {
@@ -108,10 +133,15 @@ export class SauceStage extends BaseStage {
       controller.on('moved', ({ position }) => {
         if (covered) return;
         const p = this.ctx.pizza.toLocal(position);
+        let painted = false;
         for (const point of last ? strokePoints(last, p, brush / 2) : [p]) {
           // Strokes off the pizza do nothing (G0.3).
-          if (grid.paint(point.x, point.z, brush)) paint(point);
+          if (!grid.paint(point.x, point.z, brush)) continue;
+          paint(point);
+          painted = true;
         }
+        // Each tool has its own sound while it is working (G0.6).
+        if (painted) this.ctx.audio.play(sound);
         last = p;
         if (grid.coverage >= this.ctx.config.coverageToFill) {
           covered = true;

@@ -39,6 +39,11 @@ export class TouchInput implements GrabInput {
   constructor(
     private readonly target: PointerTarget,
     private readonly toWorld: (clientX: number, clientY: number) => Vec3 | null,
+    /**
+     * Called on every finger down and up, claimed or not. Browsers only unlock
+     * audio inside a real gesture handler, and this is the only place that sees one.
+     */
+    private readonly onUserGesture?: () => void,
   ) {
     target.addEventListener('pointerdown', this.handleDown);
     target.addEventListener('pointermove', this.handleMove);
@@ -84,6 +89,7 @@ export class TouchInput implements GrabInput {
 
   private readonly handleDown = (e: PointerLike): void => {
     e.preventDefault?.();
+    this.onUserGesture?.();
     if (this.activeId !== null) return;
     if ((e.width ?? 0) > PALM_SIZE_PX || (e.height ?? 0) > PALM_SIZE_PX) return;
     const position = this.toWorld(e.clientX, e.clientY);
@@ -113,6 +119,7 @@ export class TouchInput implements GrabInput {
   };
 
   private readonly handleEnd = (e: PointerLike): void => {
+    this.onUserGesture?.();
     if (e.pointerId !== this.activeId) return;
     const position = this.toWorld(e.clientX, e.clientY);
     if (position) this.lastPosition = position;

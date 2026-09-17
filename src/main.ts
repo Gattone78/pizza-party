@@ -1,4 +1,5 @@
 import { Engine } from '@babylonjs/core/Engines/engine';
+import { SynthAudio } from './audio/SynthAudio';
 import { computeLayout, type CounterLayout } from './core/counterLayout';
 import { Emitter } from './core/events';
 import { screenToPlane } from './core/projection';
@@ -6,6 +7,7 @@ import { StageMachine } from './core/StageMachine';
 import { clientToNdc, landscapeViewport } from './core/viewport';
 import { TouchInput } from './input/TouchInput';
 import gameConfig from './data/game.json';
+import prompts from './data/prompts.json';
 import { BakeStage } from './stages/bake/BakeStage';
 import { CelebrateStage } from './stages/celebrate/CelebrateStage';
 import { CutStage } from './stages/cut/CutStage';
@@ -56,14 +58,21 @@ function bootstrap(): void {
   applyLayout();
 
   // The one place raw pointer events are read; everything else sees GrabInput (X2).
-  const input = new TouchInput(canvas, (clientX, clientY) => {
-    const ndc = clientToNdc(layout.viewport, clientX, clientY);
-    return screenToPlane(layout.rig, layout.aspect, ndc.x, ndc.y);
-  });
+  const audio = new SynthAudio(prompts);
+  const input = new TouchInput(
+    canvas,
+    (clientX, clientY) => {
+      const ndc = clientToNdc(layout.viewport, clientX, clientY);
+      return screenToPlane(layout.rig, layout.aspect, ndc.x, ndc.y);
+    },
+    // Browsers keep audio locked until a real touch.
+    () => audio.unlock(),
+  );
 
   const ctx: StageContext = {
     scene: counter.scene,
     input,
+    audio,
     config: gameConfig,
     pizza: counter.pizza,
     round: { plates: [], diners: [] },
@@ -90,7 +99,7 @@ function bootstrap(): void {
   });
 
   const debug = new URLSearchParams(location.search).has('debug') ? createDebugReadout() : null;
-  if (debug) Object.assign(window, { pizzaParty: { machine, engine, scene: counter.scene } });
+  if (debug) Object.assign(window, { pizzaParty: { machine, engine, scene: counter.scene, audio } });
 
   engine.runRenderLoop(() => {
     // Clamp so a backgrounded tab does not fast-forward tweens on return.

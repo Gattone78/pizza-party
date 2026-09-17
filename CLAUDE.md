@@ -40,11 +40,12 @@ src/
   main.ts              bootstrap and platform detection
   core/                StageMachine, Stage interface, events
   input/               GrabInput interface, TouchInput (XRInput comes later)
+  audio/               GameAudio interface, SynthAudio placeholder, drag sound wiring
   interact/            Draggable, DropZone, snap and return-home tweens
   stages/              one folder per stage: sauce, toppings, bake, cut, plate, serve, celebrate
-    shared/            BaseStage, Pizza (mask texture, toppings, slices), grey-box props, counter scene
+    shared/            BaseStage, Pizza (mask texture, toppings, slices), HintLayer, CarryEffects, grey-box props
     StageContext.ts    what every stage receives: scene, GrabInput, pizza, round props, config
-  data/                toppings.json, family.json, game.json (later prompts.json)
+  data/                toppings.json, family.json, game.json, prompts.json
 tests/
 ```
 
@@ -55,6 +56,8 @@ tests/
 - **Data-driven drag targets** (X3): each draggable lists its valid drop zones and a fallback home. Toppings, characters and prompts live in `src/data/` so new ones need no code (X5).
 - **Stages extend `BaseStage`** and register everything they create through `own`, `listen` or `drag`, so exit leaves nothing behind (P4). Props that outlive a stage (plates, diners) live in `ctx.round` and are cleared by the Celebrate stage; the `Pizza` persists and is `reset()` for each round.
 - **One `DragController` for every drag**: spawners (bowls), existing objects (slices, plates, the pizza) and tools (bottle, wheel, via `moved` events). Painting coverage (`CoverageGrid`) and cutting (`CutTracker`) are pure logic with tests.
+- **Audio goes through `ctx.audio` (`GameAudio`)**: `play(soundId)`, `say(promptId)`, `buzz()`. Stages never touch Web Audio. `SynthAudio` is a placeholder (synthesised effects, browser speech for prompts) to be replaced by shipped files in the art and audio phase; prompt text lives in `prompts.json`. Audio unlocks on the first touch via `TouchInput`'s gesture callback. Every new interaction needs a sound (P5, A6).
+- **Hints (P7, A8)**: a stage overrides `hint()` to return the motion to show for the current state, or null when the child has nothing to do. `BaseStage` runs the 10-second idle timer, the ghost hand, the target ring and the repeated prompt. `announce(promptId)` speaks a prompt and makes it the idle prompt.
 - Grey-box materials come from `flatMaterial`, which caches by name for the session. Dispose meshes, never materials.
 - **Debugging:** `?debug` shows FPS and exposes `window.pizzaParty.machine`, so `pizzaParty.machine.goTo('plate')` jumps to a stage.
 - **No physics engine** (X4). Objects follow input kinematically and tween to snap points.
