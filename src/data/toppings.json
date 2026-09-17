@@ -1,0 +1,26 @@
+[
+  {
+    "id": "pepperoni",
+    "bowlColor": "#c0392b",
+    "pieceColor": "#a3271b",
+    "bowlX": -2.2,
+    "bowlArcZ": 0.35,
+    "validZones": ["pizza"]
+  },
+  {
+    "id": "pepper",
+    "bowlColor": "#27ae60",
+    "pieceColor": "#1e8e4c",
+    "bowlX": 0,
+    "bowlArcZ": 0,
+    "validZones": ["pizza"]
+  },
+  {
+    "id": "pineapple",
+    "bowlColor": "#f1c40f",
+    "pieceColor": "#f5d547",
+    "bowlX": 2.2,
+    "bowlArcZ": 0.35,
+    "validZones": ["pizza"]
+  }
+]
