@@ -1,4 +1,3 @@
-import { CreateSphere } from '@babylonjs/core/Meshes/Builders/sphereBuilder';
 import type { SoundId } from '../../audio/GameAudio';
 import { BOWL_RADIUS, PIZZA_CENTER, PIZZA_RADIUS, PLAY_AREA, TOOL_HOME } from '../../core/counterLayout';
 import { vec3 } from '../../core/vec';
@@ -6,10 +5,12 @@ import { CoverageGrid, strokePoints } from '../../interact/CoverageGrid';
 import type { Point2 } from '../../interact/CutTracker';
 import { carryConfig, type DragController, type DragSource } from '../../interact/DragController';
 import { BaseStage } from '../shared/BaseStage';
-import { NodeView, flatMaterial } from '../shared/greybox';
+import { NodeView } from '../shared/greybox';
 import type { Hint } from '../shared/HintLayer';
 import { CHEESE_BRUSH, PIZZA_TOP_RADIUS, SAUCE_BRUSH } from '../shared/Pizza';
-import { BOTTLE_HEIGHT, BOWL_HEIGHT, createBottle, createBowl } from '../shared/props';
+import { PALETTE } from '../../art/palette';
+import { BOTTLE_HEIGHT, BOWL_HEIGHT, createBottle, createBowlSource, createHeapedBowl } from '../../art/props';
+import { createCheeseShreds } from '../../art/toppings';
 
 /** How far the bottle tips over while squirting, in radians from upright. */
 const BOTTLE_TILT = 2.3;
@@ -85,16 +86,14 @@ export class SauceStage extends BaseStage {
   private startCheese(): void {
     const { scene, pizza } = this.ctx;
     const scale = this.ctx.layout().targetScale;
-    const cheese = flatMaterial(scene, 'cheeseMat', '#f7d774');
-    const bowl = this.own(createBowl(scene, 'cheese', cheese));
+    // One little pile of shreds is both what heaps the bowl and what the child carries.
+    const pinch = this.own(createCheeseShreds(scene, 'cheesePinch', 7, 0.17));
+    pinch.isVisible = false;
+    const bowlSource = this.own(createBowlSource(scene));
+    bowlSource.isVisible = false;
+    const bowl = this.own(createHeapedBowl(scene, 'cheese', bowlSource, pinch, PALETTE.cheese[0], 0.2).node);
     bowl.position.set(TOOL_HOME.x, 0, TOOL_HOME.z);
     this.popIn(bowl, scale);
-
-    const pinch = this.own(CreateSphere('cheesePinch', { diameter: 0.5, segments: 8 }, scene));
-    pinch.scaling.y = 0.5;
-    pinch.material = cheese;
-    pinch.isPickable = false;
-    pinch.isVisible = false;
 
     let count = 0;
     const source: DragSource = {

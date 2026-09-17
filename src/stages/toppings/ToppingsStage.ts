@@ -1,6 +1,8 @@
 import type { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
+import { createBell, createBowlSource, createHeapedBowl, BOWL_HEIGHT } from '../../art/props';
+import { createToppingSource } from '../../art/toppings';
 import type { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import {
   BOWL_RADIUS,
@@ -13,14 +15,14 @@ import { distXZ, vec3 } from '../../core/vec';
 import toppingData from '../../data/toppings.json';
 import { DEFAULT_DRAG_CONFIG, type DragSource } from '../../interact/DragController';
 import { BaseStage } from '../shared/BaseStage';
-import { NodeView, flatMaterial } from '../shared/greybox';
+import { NodeView } from '../shared/greybox';
 import type { Hint } from '../shared/HintLayer';
-import { BOWL_HEIGHT, createBell, createBowl, createPieceSource, type PieceShape } from '../shared/props';
 
 interface ToppingDef {
   readonly id: string;
   readonly slot: number;
   readonly color: string;
+  readonly colors?: readonly string[];
   readonly shape: string;
   readonly size: number;
   readonly validZones: readonly string[];
@@ -34,7 +36,7 @@ const MAX_BELL_SCALE = 1.2;
 
 interface Bowl {
   readonly def: ToppingDef;
-  readonly mesh: Mesh;
+  readonly mesh: TransformNode;
   /** Hidden source mesh; every piece of this topping is an instance of it. */
   readonly pieceSource: Mesh;
 }
@@ -56,15 +58,15 @@ export class ToppingsStage extends BaseStage {
     this.rung = false;
     this.glowTime = 0;
 
+    const bowlSource = this.own(createBowlSource(scene));
+    bowlSource.isVisible = false;
     this.bowls = TOPPINGS.map((def) => {
-      const material = flatMaterial(scene, `toppingMat-${def.id}`, def.color);
-      const mesh = this.own(createBowl(scene, def.id, material));
-      const pieceSource = createPieceSource(scene, `piece-${def.id}`, def.shape as PieceShape, def.size);
-      pieceSource.material = material;
+      const pieceSource = createToppingSource(scene, `piece-${def.id}`, def.shape, def.size, def.colors);
       pieceSource.isVisible = false;
       // Landed pieces are instances of this mesh, so it has to outlive the stage.
       pizza.keepAlive(pieceSource);
-      return { def, mesh, pieceSource };
+      const bowl = createHeapedBowl(scene, def.id, bowlSource, pieceSource, def.color, def.size);
+      return { def, mesh: this.own(bowl.node), pieceSource };
     });
 
     this.bell = createBell(scene);
@@ -187,6 +189,8 @@ export class ToppingsStage extends BaseStage {
         createPiece: () => {
           const instance = bowl.pieceSource.createInstance(`${bowl.def.id}-${this.pieceCounter++}`);
           instance.isPickable = false;
+          // Every piece lands at its own angle, so the pizza looks hand-made.
+          instance.rotation.y = Math.random() * Math.PI * 2;
           return new NodeView(instance, scale);
         },
       };

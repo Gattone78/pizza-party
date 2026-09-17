@@ -6,7 +6,7 @@ import type { DropZone } from '../../interact/DropZone';
 import { easeInOutQuad, hopArc } from '../../interact/tween';
 import { BaseStage } from '../shared/BaseStage';
 import type { Hint } from '../shared/HintLayer';
-import { createDiner, type DinerLook } from '../shared/props';
+import { createAvatar, type DinerLook } from '../../art/avatar';
 import type { DinerProp } from '../StageContext';
 
 const FAMILY: readonly DinerLook[] = familyData;
@@ -17,6 +17,7 @@ const PLATE_ROW_Z = -1.75;
 /** Stage 5: family members sit along the far side; drag any plate to any of them (G5.1 to G5.3). */
 export class ServeStage extends BaseStage {
   readonly id = 'serve';
+  private time = 0;
   private nextHint: (() => Hint | null) | null = null;
 
   protected override hint(): Hint | null {
@@ -31,15 +32,17 @@ export class ServeStage extends BaseStage {
     const { scene, round } = this.ctx;
     const plates = round.plates;
     if (plates.length === 0) return this.finish();
+    // The slices have all left it.
+    this.ctx.pizza.setPlatterVisible(false);
 
     // A different mix of the family each round (G5.1).
     const guests = [...FAMILY].sort(() => Math.random() - 0.5).slice(0, plates.length);
     const seats = rowPositions(plates.length, DINER_Z);
     const diners: DinerProp[] = guests.map((look, i) => {
-      const node = createDiner(scene, look);
+      const { node, head } = createAvatar(scene, look);
       node.position.set(seats[i]?.x ?? 0, 0, DINER_Z);
-      this.popIn(node);
-      return { id: look.id, node };
+      this.popIn(node, look.size ?? 1);
+      return { id: look.id, node, head };
     });
     round.diners = diners;
 
@@ -105,12 +108,35 @@ export class ServeStage extends BaseStage {
     );
   }
 
-  /** Two happy hops (G5.3). */
+  /** Two happy hops, then a few nodding bites (G5.3). */
   private cheer(diner: DinerProp): void {
-    this.tweens.add(0.9, (t) => {
-      diner.node.position.y = hopArc((t * 2) % 1) * 0.45;
-    }, () => {
-      diner.node.position.y = 0;
+    const rest = diner.head.rotation.x;
+    this.tweens.add(
+      0.9,
+      (t) => {
+        diner.node.position.y = hopArc((t * 2) % 1) * 0.45;
+      },
+      () => {
+        diner.node.position.y = 0;
+        this.tweens.add(
+          1.2,
+          (t) => {
+            diner.head.rotation.x = rest - Math.sin(t * Math.PI * 6) * 0.22;
+          },
+          () => {
+            diner.head.rotation.x = rest;
+          },
+        );
+      },
+    );
+  }
+
+  /** Everyone sways a little while they wait, so the table feels alive. */
+  override update(dt: number): void {
+    super.update(dt);
+    this.time += dt;
+    this.ctx.round.diners.forEach((diner, i) => {
+      diner.head.rotation.z = Math.sin(this.time * 1.3 + i * 1.7) * 0.08;
     });
   }
 }

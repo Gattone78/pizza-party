@@ -40,3 +40,16 @@ Requirements still win where they differ (see "Where we differ").
 2. **Cheese stays painted** as a mask (G0.5, G0.8), not draggable pieces.
 3. **Tomato is an MVP topping.** G1.1 example list updated.
 4. Bowls go around the pizza in phase 2; carried-piece outline, sparkles and ghost hand in phase 3; heaped bowls, board, cloth and set dressing in phase 4.
+5. **Art is built in code, not from asset packs** (supersedes A2's free-library plan). The reference's flat style suits code-built shapes, one palette is guaranteed, there are no licences to track, and nothing needs a Blender pass. Any single prop can still be swapped for a GLB later.
+6. **Voice prompts are rendered with the Windows speech engine** to `public/assets/voice/*.mp3` via `npm run voice`. Replace the files with warmer recordings (or Phil's own voice) at any time; the names are the prompt ids.
+7. **Music is a procedural pentatonic music-box loop**, so it needs no file and can never clash with itself.
+
+## What was built (phase 4)
+
+- Lavender checkered tablecloth with flour dust, sauce splats, basil and stray cheese painted into it.
+- Pizza with a puffy rounded crust on a round wooden platter that travels into the oven with it; cheese browns in patches as it bakes.
+- White dishes heaped with their topping; tomato slices with seed pockets, spotted pepperoni, mushroom cross-sections, olive rings, three-lobed pepper rings, pineapple wedges.
+- Squeeze bottle with a label, brass bell, toy oven with a glass top, rounded pizza wheel, plates with coloured rims.
+- Family as peg dolls with five hair styles, glasses, cheeks and smiles; they sway while waiting, hop when served and nod while eating.
+- Soft blob shadows under everything, and a landing shadow under whatever is being carried.
+

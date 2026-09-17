@@ -1,10 +1,12 @@
 import { CreateBox } from '@babylonjs/core/Meshes/Builders/boxBuilder';
+import type { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 import type { Scene } from '@babylonjs/core/scene';
 import type { Unsubscribe } from '../../core/events';
 import { distXZ, type Vec3 } from '../../core/vec';
 import type { DragController } from '../../interact/DragController';
 import type { TweenRunner } from '../../interact/tween';
+import { blobShadow } from '../../art/build';
 import { NodeView, createBasedCylinder, flatMaterial } from './greybox';
 
 export interface CarryEffectOptions {
@@ -23,6 +25,8 @@ const SPARK_LIFE = 0.55;
 export class CarryEffects {
   private readonly halo: Mesh;
   private readonly spark: Mesh;
+  /** Falls where the piece will land, which shows a toddler where to let go. */
+  private readonly shadow: InstancedMesh;
   private readonly subscriptions: Unsubscribe[];
   private lastSpark: Vec3 | null = null;
   private sparkCount = 0;
@@ -41,9 +45,13 @@ export class CarryEffects {
     this.spark.isPickable = false;
     this.spark.isVisible = false;
 
+    this.shadow = blobShadow(scene, 0.45);
+    this.shadow.setEnabled(false);
+
     this.subscriptions = [
       controller.on('grabbed', ({ sourceId, piece }) => {
         this.lastSpark = null;
+        this.shadow.setEnabled(true);
         const radius = options.halo?.(sourceId) ?? null;
         if (radius === null || !(piece instanceof NodeView)) return;
         this.halo.parent = piece.node;
@@ -52,10 +60,13 @@ export class CarryEffects {
         this.halo.setEnabled(true);
       }),
       controller.on('released', () => {
+        this.shadow.setEnabled(false);
         this.halo.parent = null;
         this.halo.setEnabled(false);
       }),
-      controller.on('moved', ({ carried }) => {
+      controller.on('moved', ({ carried, position }) => {
+        // Just above the pizza's surface, so it shows on the counter and on the pizza alike.
+        this.shadow.position.set(position.x, 0.17, position.z);
         if (this.lastSpark && distXZ(this.lastSpark, carried) < SPARK_SPACING) return;
         this.lastSpark = carried;
         const spark = this.spark.createInstance(`spark-${this.sparkCount++}`);
@@ -80,6 +91,7 @@ export class CarryEffects {
     this.subscriptions.forEach((off) => off());
     this.halo.parent = null;
     this.halo.dispose();
+    this.shadow.dispose();
     // Disposing the source also removes any sparks still fading.
     this.spark.dispose();
   }

@@ -7,11 +7,12 @@ import { easeOutCubic } from '../../interact/tween';
 import { BaseStage } from '../shared/BaseStage';
 import { flatMaterial } from '../shared/greybox';
 import type { Hint } from '../shared/HintLayer';
-import { createOven, type OvenProp } from '../shared/props';
+import { createOven, type OvenProp } from '../../art/props';
 
-const OVEN_SIZE = PIZZA_RADIUS * 2 + 0.3;
+/** Roomy enough for the pizza on its platter. */
+const OVEN_SIZE = PIZZA_RADIUS * 2 + 0.55;
 const OVEN_HEIGHT = 0.9;
-const OVEN_X = 2.75;
+const OVEN_X = 2.9;
 const OFFSTAGE_X = PLAY_AREA.maxX + OVEN_SIZE;
 const PIZZA_START_X = -2.4;
 

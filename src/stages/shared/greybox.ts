@@ -46,8 +46,11 @@ export function createBasedCylinder(
 }
 
 export interface SectorOptions {
-  readonly radius: number;
-  readonly height: number;
+  /**
+   * Cross-section from the centre outwards as [radius, height] points. The
+   * solid below it is filled in, so [[0, h], [R, h], [R, 0]] is a plain prism.
+   */
+  readonly profile: readonly (readonly [number, number])[];
   /** Angles from +x towards +z. A full circle omits the two cut faces. */
   readonly from: number;
   readonly to: number;
@@ -58,13 +61,14 @@ export interface SectorOptions {
 }
 
 /**
- * A pizza-slice prism (or a full disc): top face, rim and cut faces. UVs are
- * planar from above, so slices keep showing their part of the pizza texture.
- * Use with a material that has back-face culling off.
+ * A pizza slice (or a whole pizza) swept from a profile: smooth-shaded top
+ * and rim, flat cut faces. UVs are planar from above, so slices keep showing
+ * their part of the pizza texture. Use with back-face culling off.
  */
 export function createSector(scene: Scene, name: string, o: SectorOptions): Mesh {
   const full = o.to - o.from >= Math.PI * 2 - 1e-6;
   const segments = Math.max(3, Math.ceil(((o.to - o.from) / (Math.PI * 2)) * 48));
+  const profile = o.profile;
   const positions: number[] = [];
   const normals: number[] = [];
   const uvs: number[] = [];
@@ -76,44 +80,56 @@ export function createSector(scene: Scene, name: string, o: SectorOptions): Mesh
     uvs.push(x / (o.uvRadius * 2) + 0.5, z / (o.uvRadius * 2) + 0.5);
     return positions.length / 3 - 1;
   };
-  const rim = (i: number): { x: number; z: number; nx: number; nz: number } => {
-    const a = o.from + ((o.to - o.from) * i) / segments;
-    return { x: Math.cos(a) * o.radius, z: Math.sin(a) * o.radius, nx: Math.cos(a), nz: Math.sin(a) };
-  };
-  const quad = (a: number, b: number, c: number, d: number): void => {
-    indices.push(a, b, c, a, c, d);
-  };
 
-  const center = push(0, o.height, 0, 0, 1, 0);
+  // Outward normal of each profile point in the (radius, height) plane, averaged for smooth shading.
+  const profileNormals = profile.map((_, k) => {
+    let nr = 0;
+    let ny = 0;
+    for (const j of [k - 1, k]) {
+      const p0 = profile[j];
+      const p1 = profile[j + 1];
+      if (!p0 || !p1) continue;
+      const length = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) || 1;
+      nr += -(p1[1] - p0[1]) / length;
+      ny += (p1[0] - p0[0]) / length;
+    }
+    const length = Math.hypot(nr, ny) || 1;
+    return [nr / length, ny / length] as const;
+  });
+
+  // The swept surface: a grid of (angle, profile point) vertices.
+  const columns = segments + 1;
   for (let i = 0; i <= segments; i++) {
-    const p = rim(i);
-    const top = push(p.x, o.height, p.z, 0, 1, 0);
-    if (i > 0) indices.push(center, top - 1, top);
+    const angle = o.from + ((o.to - o.from) * i) / segments;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    profile.forEach(([r, y], k) => {
+      const [nr, ny] = profileNormals[k] ?? [0, 1];
+      push(cos * r, y, sin * r, cos * nr, ny, sin * nr);
+    });
   }
-  for (let i = 0; i < segments; i++) {
-    const p = rim(i);
-    const q = rim(i + 1);
-    quad(
-      push(p.x, o.height, p.z, p.nx, 0, p.nz),
-      push(q.x, o.height, q.z, q.nx, 0, q.nz),
-      push(q.x, 0, q.z, q.nx, 0, q.nz),
-      push(p.x, 0, p.z, p.nx, 0, p.nz),
-    );
+  for (let i = 0; i < columns - 1; i++) {
+    for (let k = 0; k < profile.length - 1; k++) {
+      const a = i * profile.length + k;
+      const b = (i + 1) * profile.length + k;
+      indices.push(a, b, b + 1, a, b + 1, a + 1);
+    }
   }
+
+  // Flat cut faces: a fan over the cross-section, from the axis at counter level.
   if (!full) {
-    for (const [i, sign] of [
-      [0, 1],
-      [segments, -1],
+    for (const [angle, sign] of [
+      [o.from, 1],
+      [o.to, -1],
     ] as const) {
-      const p = rim(i);
-      const nx = p.nz * sign;
-      const nz = -p.nx * sign;
-      quad(
-        push(0, o.height, 0, nx, 0, nz),
-        push(p.x, o.height, p.z, nx, 0, nz),
-        push(p.x, 0, p.z, nx, 0, nz),
-        push(0, 0, 0, nx, 0, nz),
-      );
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const nx = sin * sign;
+      const nz = -cos * sign;
+      const hub = push(0, 0, 0, nx, 0, nz);
+      const first = positions.length / 3;
+      for (const [r, y] of profile) push(cos * r, y, sin * r, nx, 0, nz);
+      for (let k = 0; k < profile.length - 1; k++) indices.push(hub, first + k, first + k + 1);
     }
   }
 

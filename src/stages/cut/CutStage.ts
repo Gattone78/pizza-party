@@ -9,7 +9,7 @@ import { BaseStage } from '../shared/BaseStage';
 import { NodeView, flatMaterial } from '../shared/greybox';
 import type { Hint } from '../shared/HintLayer';
 import type { PizzaSlice } from '../shared/Pizza';
-import { createWheel } from '../shared/props';
+import { createWheel } from '../../art/props';
 
 /** How far slices part along each cut (G3.4). */
 const CUT_GAP = 0.09;

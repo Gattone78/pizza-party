@@ -26,6 +26,7 @@ export interface PlateProp {
 export interface DinerProp {
   readonly id: string;
   readonly node: TransformNode;
+  readonly head: TransformNode;
 }
 
 /** Props made by one stage and used by later ones. Cleared when the round ends. */

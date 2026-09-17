@@ -1,7 +1,7 @@
 [
-  { "id": "dad", "body": "#3b6fb6", "skin": "#e8b98f", "hair": "#4a3426" },
-  { "id": "mum", "body": "#c2477a", "skin": "#f0c8a0", "hair": "#2b1d14" },
-  { "id": "grandma", "body": "#7a57b3", "skin": "#eac3a0", "hair": "#d9d9d9" },
-  { "id": "grandpa", "body": "#4f8a5b", "skin": "#d9a679", "hair": "#bdbdbd" },
-  { "id": "sibling", "body": "#e08a2e", "skin": "#f0c8a0", "hair": "#c9a227" }
+  { "id": "dad", "body": "#3b7dd8", "skin": "#e8b98f", "hair": "#4a3426", "hairStyle": "short", "glasses": true },
+  { "id": "mum", "body": "#e0559a", "skin": "#f0c8a0", "hair": "#2b1d14", "hairStyle": "long" },
+  { "id": "grandma", "body": "#8a63d2", "skin": "#eac3a0", "hair": "#e3e3e8", "hairStyle": "bun", "glasses": true },
+  { "id": "grandpa", "body": "#3fa66b", "skin": "#d9a679", "hair": "#c9c9cf", "hairStyle": "balding" },
+  { "id": "sibling", "body": "#f08a24", "skin": "#f0c8a0", "hair": "#d8a531", "hairStyle": "curly", "size": 0.82 }
 ]

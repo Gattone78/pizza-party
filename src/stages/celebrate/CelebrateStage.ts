@@ -1,10 +1,11 @@
 import { CreateBox } from '@babylonjs/core/Meshes/Builders/boxBuilder';
+import { PALETTE } from '../../art/palette';
 import { PLAY_AREA } from '../../core/counterLayout';
 import { hopArc } from '../../interact/tween';
 import { BaseStage } from '../shared/BaseStage';
 import { flatMaterial } from '../shared/greybox';
 
-const COLORS = ['#ff5a5f', '#ffb400', '#2ec4b6', '#7b61ff', '#8ac926'];
+const COLORS = PALETTE.confetti;
 const PIECES_PER_COLOR = 9;
 
 /**

@@ -113,6 +113,7 @@ function bootstrap(): void {
       location.reload();
       return;
     }
+    audio.update();
     counter.scene.render();
     debug?.(engine.getFps());
   });

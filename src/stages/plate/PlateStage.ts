@@ -7,7 +7,8 @@ import { easeOutCubic } from '../../interact/tween';
 import { BaseStage } from '../shared/BaseStage';
 import { NodeView } from '../shared/greybox';
 import type { Hint } from '../shared/HintLayer';
-import { PLATE_HEIGHT, createPlate } from '../shared/props';
+import { PALETTE } from '../../art/palette';
+import { PLATE_HEIGHT, createPlate } from '../../art/props';
 import type { PlateProp } from '../StageContext';
 
 const PLATE_RADIUS = 0.85;
@@ -33,7 +34,8 @@ export class PlateStage extends BaseStage {
     const count = sliceCount(config.cuts);
 
     const plates: PlateProp[] = platePositions(count).map((p, i) => {
-      const node = createPlate(scene, `plate-${i}`, PLATE_RADIUS);
+      const rim = PALETTE.plateRims[i % PALETTE.plateRims.length] ?? PALETTE.plateRims[0];
+      const node = createPlate(scene, `plate-${i}`, PLATE_RADIUS, rim);
       node.position.set(p.x, 0, p.z);
       this.popIn(node);
       return { id: `plate-${i}`, node, view: new NodeView(node, 1, false), slice: null };

@@ -242,7 +242,7 @@ Open questions, most important first:
 - [x] Passthrough or virtual kitchen? Answered: both, switchable in parent settings.
 - [x] Sauce and cheese? Answered: the child spreads both (Stage 0).
 - [x] Who gets served? Answered: family-member avatars.
-- [x] Art source? Answered: free asset libraries.
-- [x] Voice prompts? Answered: generated text-to-speech, pre-rendered to audio files.
+- [x] Art source? Answered: free asset libraries. Revised 2026-09-17: art is built in code from one palette, in the style of `docs/reference/pizza-app.jpg`; see `docs/art-direction.md`. A2 applies only if a prop is later swapped for a model.
+- [x] Voice prompts? Answered: generated text-to-speech, pre-rendered to audio files (Windows speech via `npm run voice`; replaceable with recordings).
 - [x] Sauce tool? Answered: a squeeze bottle, not a ladle. Cheese stays painted (G0.5). Tomato joins the MVP toppings. See `docs/art-direction.md`.
 - [x] What next? Answered: a Claude Code build plan and first prompt, in the Build plan tab.

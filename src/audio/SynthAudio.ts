@@ -72,17 +72,38 @@ const MIN_GAPS: Partial<Record<SoundId, number>> = { squirt: 0.11, sprinkle: 0.0
 export interface AudioSettings {
   sounds: boolean;
   voice: boolean;
+  music: boolean;
 }
 
+/** A gentle music-box loop on a pentatonic scale, so no two notes ever clash. */
+const SCALE = [261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33, 659.25];
+const BEAT = 60 / 84 / 2;
+/** Scale steps per eighth note; -1 is a rest. Eight bars, then it loops (A6). */
+const MELODY = [
+  0, -1, 2, 3, 4, -1, 3, -1, 2, -1, 3, 2, 0, -1, -1, -1,
+  1, -1, 3, 4, 5, -1, 4, -1, 3, -1, 4, 3, 1, -1, -1, -1,
+  2, -1, 4, 5, 6, -1, 5, -1, 4, -1, 5, 4, 2, -1, 3, -1,
+  4, -1, 3, 2, 3, -1, 1, -1, 0, -1, -1, -1, 0, -1, -1, -1,
+];
+const BASS = [0, 3, 4, 0];
+
 /**
- * Web Audio synth for sound effects and the browser's built-in speech for
- * voice prompts. Both are placeholders for the shipped audio files of the art
- * and audio phase, and both work offline (N1).
+ * All game audio through one Web Audio context: synthesised sound effects,
+ * a procedural music loop, and the spoken prompts shipped as
+ * public/assets/voice/<promptId>.mp3. Nothing is fetched from outside the
+ * app, so it all works offline (N1). If a voice file is missing, the
+ * browser's built-in speech stands in.
  */
 export class SynthAudio implements GameAudio {
-  readonly settings: AudioSettings = { sounds: true, voice: true };
+  readonly settings: AudioSettings = { sounds: true, voice: true, music: true };
   private context: AudioContext | null = null;
   private master: GainNode | null = null;
+  private musicGain: GainNode | null = null;
+  private readonly voices = new Map<string, AudioBuffer>();
+  private speaking: AudioBufferSourceNode | null = null;
+  private loading: Promise<void> | null = null;
+  private nextBeatAt = 0;
+  private beat = 0;
   private noise: AudioBuffer | null = null;
   private readonly throttle = new SoundThrottle(MIN_GAPS);
   private unlocked = false;
@@ -102,6 +123,12 @@ export class SynthAudio implements GameAudio {
         this.master = this.context.createGain();
         this.master.gain.value = 0.6;
         this.master.connect(this.context.destination);
+        this.musicGain = this.context.createGain();
+        this.musicGain.gain.value = 1;
+        this.musicGain.connect(this.master);
+        this.loading = this.loadVoices(this.context).then(() => {
+          this.loading = null;
+        });
       }
     }
     if (this.context?.state === 'suspended') void this.context.resume();
@@ -119,14 +146,67 @@ export class SynthAudio implements GameAudio {
     for (const tone of SOUNDS[sound]) this.playTone(context, this.master, tone);
   }
 
+  /** Call every frame: keeps the music scheduled a little ahead of the clock. */
+  update(): void {
+    const context = this.context;
+    if (!context || !this.musicGain || context.state !== 'running') return;
+    if (!this.settings.music) {
+      this.nextBeatAt = 0;
+      return;
+    }
+    if (this.nextBeatAt < context.currentTime) this.nextBeatAt = context.currentTime + 0.1;
+    while (this.nextBeatAt < context.currentTime + 0.4) {
+      const step = MELODY[this.beat % MELODY.length] ?? -1;
+      const note = SCALE[step];
+      if (note) this.playTone(context, this.musicGain, { wave: 'sine', from: note * 2, dur: 0.9, gain: 0.05 }, this.nextBeatAt);
+      if (this.beat % 8 === 0) {
+        const bass = SCALE[BASS[(this.beat / 16) % BASS.length | 0] ?? 0];
+        if (bass) this.playTone(context, this.musicGain, { wave: 'triangle', from: bass / 2, dur: 2.2, gain: 0.06 }, this.nextBeatAt);
+      }
+      this.beat++;
+      this.nextBeatAt += BEAT;
+    }
+  }
+
   say(promptId: string): void {
     const text = this.prompts[promptId];
-    if (!text || !this.settings.voice || !('speechSynthesis' in window)) return;
+    if (!text || !this.settings.voice) return;
     if (!this.unlocked) {
       this.pendingPrompt = promptId;
       return;
     }
     this.pendingPrompt = null;
+    if (this.loading) {
+      // The files are tiny and local; wait for them rather than speak in a different voice.
+      void this.loading.then(() => this.say(promptId));
+      return;
+    }
+
+    const buffer = this.voices.get(promptId);
+    const context = this.context;
+    if (buffer && context && this.master) {
+      try {
+        this.speaking?.stop();
+      } catch {
+        // Already finished.
+      }
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.connect(this.master);
+      source.start();
+      this.speaking = source;
+      // Duck the music under the voice so the words are easy to hear.
+      const music = this.musicGain?.gain;
+      if (music) {
+        const now = context.currentTime;
+        music.cancelScheduledValues(now);
+        music.setTargetAtTime(0.3, now, 0.05);
+        music.setTargetAtTime(1, now + buffer.duration, 0.3);
+      }
+      return;
+    }
+
+    if (!('speechSynthesis' in window)) return;
     try {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
@@ -147,8 +227,22 @@ export class SynthAudio implements GameAudio {
     }
   }
 
-  private playTone(context: AudioContext, out: AudioNode, tone: Tone): void {
-    const start = context.currentTime + (tone.at ?? 0);
+  private async loadVoices(context: AudioContext): Promise<void> {
+    await Promise.all(
+      Object.keys(this.prompts).map(async (id) => {
+        try {
+          const response = await fetch(`${import.meta.env.BASE_URL}assets/voice/${id}.mp3`);
+          if (!response.ok) return;
+          this.voices.set(id, await context.decodeAudioData(await response.arrayBuffer()));
+        } catch {
+          // A missing or undecodable file falls back to built-in speech.
+        }
+      }),
+    );
+  }
+
+  private playTone(context: AudioContext, out: AudioNode, tone: Tone, at = context.currentTime): void {
+    const start = at + (tone.at ?? 0);
     const end = start + tone.dur;
     const gain = context.createGain();
     const peak = tone.gain ?? 0.3;

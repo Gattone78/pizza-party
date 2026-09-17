@@ -1,6 +1,7 @@
 import { StandardMaterial } from '@babylonjs/core/Materials/standardMaterial';
 import { DynamicTexture } from '@babylonjs/core/Materials/Textures/dynamicTexture';
 import { Color3 } from '@babylonjs/core/Maths/math.color';
+import type { InstancedMesh } from '@babylonjs/core/Meshes/instancedMesh';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
 import type { Scene } from '@babylonjs/core/scene';
@@ -8,23 +9,44 @@ import { PIZZA_CENTER, PIZZA_RADIUS } from '../../core/counterLayout';
 import { vec3, type Vec3 } from '../../core/vec';
 import { sliceCount, sliceIndexForPoint, sliceSpan, type Point2 } from '../../interact/CutTracker';
 import type { DropZone } from '../../interact/DropZone';
+import { blobShadow, merge, place, puck } from '../../art/build';
+import { PALETTE } from '../../art/palette';
 import { NodeView, createSector, flatMaterial } from './greybox';
 
-const CRUST_HEIGHT = 0.12;
+const CRUST_HEIGHT = 0.1;
 const TOP_HEIGHT = 0.02;
+const R = PIZZA_RADIUS;
+/** Dough base with a puffy rounded rim. */
+const CRUST_PROFILE = [
+  [0, CRUST_HEIGHT],
+  [R - 0.3, CRUST_HEIGHT],
+  [R - 0.25, 0.16],
+  [R - 0.15, 0.2],
+  [R - 0.06, 0.17],
+  [R, 0.09],
+  [R, 0],
+] as const;
+const PLATTER_RADIUS = R + 0.17;
 /** The sauce-able area inside the crust ring. Also the extent of the mask texture. */
 export const PIZZA_TOP_RADIUS = PIZZA_RADIUS - 0.25;
+const TOP_PROFILE = [
+  [0, TOP_HEIGHT],
+  [PIZZA_TOP_RADIUS, TOP_HEIGHT],
+  [PIZZA_TOP_RADIUS, 0],
+] as const;
 export const SAUCE_BRUSH = 0.4;
 export const CHEESE_BRUSH = 0.45;
 
 const TEXTURE_SIZE = 512;
-const DOUGH = '#f6dc9a';
-const SAUCE = '#c8321e';
-const CHEESE = ['#f7d774', '#ffe9a0', '#f2c94c'];
-const CRUST_RAW = Color3.FromHexString('#e0a458');
-const CRUST_BAKED = Color3.FromHexString('#a9672c');
+const DOUGH = PALETTE.dough;
+const SAUCE = PALETTE.sauce;
+const CHEESE = PALETTE.cheese;
+const CRUST_RAW = Color3.FromHexString(PALETTE.crust);
+const CRUST_BAKED = Color3.FromHexString(PALETTE.crustBaked);
+/** Browned patches that appear on the cheese as it bakes. */
+const BAKE_SPOTS = 22;
 const TOP_RAW = Color3.White();
-const TOP_BAKED = new Color3(0.86, 0.72, 0.55);
+const TOP_BAKED = new Color3(0.9, 0.78, 0.62);
 
 export interface PizzaSlice {
   readonly index: number;
@@ -54,6 +76,9 @@ export class Pizza {
   slices: PizzaSlice[] | null = null;
 
   private readonly crust: Mesh;
+  private readonly platter: Mesh;
+  private readonly shadow: InstancedMesh;
+  private bakeSpots = 0;
   private readonly top: Mesh;
   private readonly crustMaterial: StandardMaterial;
   private readonly topMaterial: StandardMaterial;
@@ -67,7 +92,16 @@ export class Pizza {
     this.root = new TransformNode('pizza', scene);
     this.view = new NodeView(this.root, 1, false);
 
-    this.crustMaterial = flatMaterial(scene, 'crustMat', '#e0a458', true);
+    // A round wooden platter travels with the pizza, into the oven and back.
+    this.platter = merge('pizzaPlatter', [
+      puck(scene, PALETTE.woodDark, { radius: PLATTER_RADIUS, height: 0.04, tessellation: 48 }),
+      place(puck(scene, PALETTE.wood, { radius: PLATTER_RADIUS - 0.08, height: 0.01, tessellation: 48 }), { y: 0.04 }),
+    ]);
+    this.platter.parent = this.root;
+    this.shadow = blobShadow(scene, PLATTER_RADIUS * 1.18);
+    this.shadow.parent = this.root;
+
+    this.crustMaterial = flatMaterial(scene, 'crustMat', PALETTE.crust, true);
     this.crustMaterial.backFaceCulling = false;
 
     this.texture = new DynamicTexture('pizzaMask', TEXTURE_SIZE, scene, true);
@@ -78,10 +112,10 @@ export class Pizza {
     this.topMaterial.backFaceCulling = false;
 
     const whole = { from: 0, to: Math.PI * 2, origin: { x: 0, z: 0 }, uvRadius: PIZZA_TOP_RADIUS };
-    this.crust = createSector(scene, 'pizzaCrust', { ...whole, radius: PIZZA_RADIUS, height: CRUST_HEIGHT });
+    this.crust = createSector(scene, 'pizzaCrust', { ...whole, profile: CRUST_PROFILE });
     this.crust.material = this.crustMaterial;
     this.crust.parent = this.root;
-    this.top = createSector(scene, 'pizzaTop', { ...whole, radius: PIZZA_TOP_RADIUS, height: TOP_HEIGHT });
+    this.top = createSector(scene, 'pizzaTop', { ...whole, profile: TOP_PROFILE });
     this.top.material = this.topMaterial;
     this.top.parent = this.root;
     this.top.position.y = CRUST_HEIGHT;
@@ -104,6 +138,8 @@ export class Pizza {
     this.keptAlive = [];
     this.crust.setEnabled(true);
     this.top.setEnabled(true);
+    this.setPlatterVisible(true);
+    this.bakeSpots = 0;
     this.root.position.set(PIZZA_CENTER.x, PIZZA_CENTER.y, PIZZA_CENTER.z);
     this.setBaked(0);
 
@@ -150,10 +186,24 @@ export class Pizza {
     this.keptAlive.push(item);
   }
 
-  /** Raw to baked look, 0..1 (grey-box stand-in for the A3 shader blend). */
+  /** Raw to baked look, 0..1 (A3): the crust and cheese darken and brown patches appear. */
   setBaked(t: number): void {
     Color3.LerpToRef(CRUST_RAW, CRUST_BAKED, t, this.crustMaterial.diffuseColor);
     Color3.LerpToRef(TOP_RAW, TOP_BAKED, t, this.topMaterial.diffuseColor);
+    // The cheese bubbles and browns in patches as the bake goes on (G2.3).
+    const wanted = Math.floor(t * BAKE_SPOTS);
+    for (; this.bakeSpots < wanted; this.bakeSpots++) {
+      const distance = Math.sqrt(Math.random()) * PIZZA_TOP_RADIUS * 0.95;
+      const angle = Math.random() * Math.PI * 2;
+      this.context.fillStyle = `rgba(150, 78, 20, ${0.16 + Math.random() * 0.14})`;
+      this.disc({ x: Math.cos(angle) * distance, z: Math.sin(angle) * distance }, 0.06 + Math.random() * 0.1);
+    }
+  }
+
+  /** The empty platter is cleared away once the slices have all left it. */
+  setPlatterVisible(visible: boolean): void {
+    this.platter.setEnabled(visible);
+    this.shadow.setEnabled(visible);
   }
 
   /** Swap the whole pizza for slices that look identical until they are moved apart. */
@@ -171,18 +221,10 @@ export class Pizza {
       node.position.set(rest.x, 0, rest.z);
 
       const shape = { from, to, origin: rest, uvRadius: PIZZA_TOP_RADIUS };
-      const crust = createSector(this.scene, `sliceCrust-${index}`, {
-        ...shape,
-        radius: PIZZA_RADIUS,
-        height: CRUST_HEIGHT,
-      });
+      const crust = createSector(this.scene, `sliceCrust-${index}`, { ...shape, profile: CRUST_PROFILE });
       crust.material = this.crustMaterial;
       crust.parent = node;
-      const top = createSector(this.scene, `sliceTop-${index}`, {
-        ...shape,
-        radius: PIZZA_TOP_RADIUS,
-        height: TOP_HEIGHT,
-      });
+      const top = createSector(this.scene, `sliceTop-${index}`, { ...shape, profile: TOP_PROFILE });
       top.material = this.topMaterial;
       top.parent = node;
       top.position.y = CRUST_HEIGHT;
